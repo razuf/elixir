@@ -427,6 +427,30 @@ defmodule Registry do
             :error
         end
 
+      {:duplicate, partitions, key_ets} ->
+        key_ets = key_ets || key_ets!(registry, key, partitions)
+
+        try do
+          entries =
+            for {^key, {pid, _old_value}} = object <- :ets.lookup(key_ets, key),
+                pid == self(),
+                do: object
+
+          # First, we need to delete all objects because if we start updating them,
+          # then we might accidentally delete objects that we already updated. Instead,
+          # we remove all objects for the given key and the current PID, and then
+          # reinsert all of them with the updated values.
+          Enum.each(entries, &:ets.delete_object(key_ets, &1))
+
+          for {^key, {pid, old_value}} <- entries do
+            new_value = callback.(old_value)
+            :ets.insert(key_ets, {key, {pid, new_value}})
+            {new_value, old_value}
+          end
+        catch
+          :error, :badarg -> :error
+        end
+
       {kind, _, _} ->
         raise ArgumentError, "Registry.update_value/3 is not supported for #{kind} registries"
     end
