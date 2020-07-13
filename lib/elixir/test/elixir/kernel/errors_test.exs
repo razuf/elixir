@@ -186,7 +186,7 @@ defmodule Kernel.ErrorsTest do
   end
 
   test "unexpected end" do
-    assert_eval_raise SyntaxError, "nofile:1: unexpected token: end", '1 end'
+    assert_eval_raise SyntaxError, "nofile:1: unexpected reserved word: end", '1 end'
 
     assert_eval_raise SyntaxError,
                       ~r" HINT: it looks like the \"end\" on line 2 does not have a matching \"do\" defined before it",
@@ -260,7 +260,7 @@ defmodule Kernel.ErrorsTest do
                       '+.foo'
 
     assert_eval_raise SyntaxError,
-                      ~r"nofile:1: syntax error before: after. \"after\" is a keyword",
+                      ~r"nofile:1: syntax error before: after. \"after\" is a reserved word",
                       'after = 1'
   end
 
@@ -280,7 +280,7 @@ defmodule Kernel.ErrorsTest do
   end
 
   test "syntax error with do" do
-    assert_eval_raise SyntaxError, ~r/nofile:1: unexpected token: do./, 'if true, do\n'
+    assert_eval_raise SyntaxError, ~r/nofile:1: unexpected reserved word: do./, 'if true, do\n'
 
     assert_eval_raise SyntaxError, ~r/nofile:1: unexpected keyword: do:./, 'if true do:\n'
   end
@@ -307,12 +307,6 @@ defmodule Kernel.ErrorsTest do
     assert_eval_raise SyntaxError, msg, 'foo 1, @bar 3, 4'
     assert_eval_raise SyntaxError, msg, 'foo 1, 2 + bar 3, 4'
     assert_eval_raise SyntaxError, msg, 'foo(1, foo 2, 3)'
-
-    assert is_list(List.flatten([1]))
-    assert is_list(Enum.reverse([3, 2, 1], [4, 5, 6]))
-    assert is_list(Enum.reverse([3, 2, 1], [4, 5, 6]))
-    assert false || is_list(Enum.reverse([3, 2, 1], [4, 5, 6]))
-    assert [List.flatten(List.flatten([1]))] == [[1]]
 
     interpret = fn x -> Macro.to_string(Code.string_to_quoted!(x)) end
     assert interpret.("f 1 + g h 2, 3") == "f(1 + g(h(2, 3)))"
@@ -1113,7 +1107,7 @@ defmodule Kernel.ErrorsTest do
 
   test "invalid \"fn do expr end\"" do
     assert_eval_raise SyntaxError,
-                      "nofile:1: unexpected token: do. Anonymous functions are written as:\n\n    fn pattern -> expression end",
+                      "nofile:1: unexpected reserved word: do. Anonymous functions are written as:\n\n    fn pattern -> expression end",
                       'fn do :ok end'
   end
 
@@ -1232,6 +1226,14 @@ defmodule Kernel.ErrorsTest do
     assert_eval_raise CompileError, "nofile:1: key :a will be overridden in map", """
       %{a: :b, a: :c, a: :d} = %{a: :c}
     """
+  end
+
+  test "| outside of cons" do
+    assert_eval_raise CompileError, ~r"nofile:1: misplaced operator |/2", "1 | 2"
+
+    assert_eval_raise CompileError,
+                      ~r"nofile:1: misplaced operator |/2",
+                      "defmodule Foo, do: (def bar(1 | 2), do: :ok)"
   end
 
   defp bad_remote_call(x), do: x.foo

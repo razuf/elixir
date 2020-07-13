@@ -41,11 +41,15 @@ defmodule Map do
   will raise a `KeyError` if the `map` doesn't contain the key `:key`, compared to
   `map[:key]`, that would return `nil`.
 
-      iex> map = %{foo: "bar", baz: "bong"}
-      iex> map.foo
-      "bar"
-      iex> map.non_existing_key
-      ** (KeyError) key :non_existing_key not found in: %{baz: "bong", foo: "bar"}
+      map = %{foo: "bar", baz: "bong"}
+      map.foo
+      #=> "bar"
+      map.non_existing_key
+      #=> ** (KeyError) key :non_existing_key not found in: %{baz: "bong", foo: "bar"}
+
+  > Note: do not add parens when accessing fields, such as in `data.key()`.
+  > If parenthesis are used, Elixir will consider it to be a function call
+  > on `data`, which would be expected to be an atom.
 
   The two syntaxes for accessing keys reveal the dual nature of maps. The `map[key]`
   syntax is used for dynamically created maps that may have any key, of any type.
@@ -298,8 +302,20 @@ defmodule Map do
     end
   end
 
-  @doc false
-  @deprecated "Use Map.fetch/2 + Map.put/3 instead"
+  @doc """
+  Puts a value under `key` only if the `key` already exists in `map`.
+
+  ## Examples
+
+      iex> Map.replace(%{a: 1, b: 2}, :a, 3)
+      %{a: 3, b: 2}
+
+      iex> Map.replace(%{a: 1}, :b, 2)
+      %{a: 1}
+
+  """
+  @doc since: "1.11.0"
+  @spec replace(map, key, value) :: map
   def replace(map, key, value) do
     case map do
       %{^key => _value} ->
@@ -314,8 +330,7 @@ defmodule Map do
   end
 
   @doc """
-  Alters the value stored under `key` to `value`, but only
-  if the entry `key` already exists in `map`.
+  Puts a value under `key` only if the `key` already exists in `map`.
 
   If `key` is not present in `map`, a `KeyError` exception is raised.
 

@@ -49,18 +49,35 @@ defmodule Mix.Tasks.Compile do
     * `--erl-config` - path to an Erlang term file that will be loaded as Mix config
     * `--force` - forces compilation
     * `--list` - lists all enabled compilers
+    * `--no-app-loading` - does not load applications (including from deps) before compiling
     * `--no-archives-check` - skips checking of archives
     * `--no-compile` - does not actually compile, only loads code and perform checks
     * `--no-deps-check` - skips checking of dependencies
     * `--no-elixir-version-check` - does not check Elixir version
     * `--no-protocol-consolidation` - skips protocol consolidation
+    * `--no-validate-compile-env` - does not validate the application compile environment
     * `--return-errors` - returns error status and diagnostics instead of exiting on error
 
   """
 
+  @doc """
+  Returns all compilers.
+  """
+  def compilers(config \\ Mix.Project.config()) do
+    # TODO: Deprecate :xref on v1.12
+    compilers = config[:compilers] || Mix.compilers()
+    List.delete(compilers, :xref)
+  end
+
   @impl true
   def run(["--list"]) do
-    loadpaths!()
+    # Loadpaths without checks because compilers may be defined in deps.
+    args = ["--no-elixir-version-check", "--no-deps-check", "--no-archives-check"]
+    Mix.Task.run("loadpaths", args)
+    Mix.Task.reenable("loadpaths")
+    Mix.Task.reenable("deps.loadpaths")
+
+    # Compilers are tasks, so load all tasks available.
     _ = Mix.Task.load_all()
 
     shell = Mix.shell()
@@ -90,6 +107,7 @@ defmodule Mix.Tasks.Compile do
     :ok
   end
 
+  @impl true
   def run(args) do
     Mix.Project.get!()
     Mix.Task.run("loadpaths", args)
@@ -117,6 +135,14 @@ defmodule Mix.Tasks.Compile do
     end
   end
 
+  defp format(expression, args) do
+    :io_lib.format(expression, args) |> IO.iodata_to_binary()
+  end
+
+  defp first_line(doc) do
+    String.split(doc, "\n", parts: 2) |> hd |> String.trim() |> String.trim_trailing(".")
+  end
+
   defp merge_diagnostics({status1, diagnostics1}, {status2, diagnostics2}) do
     new_status =
       cond do
@@ -128,13 +154,27 @@ defmodule Mix.Tasks.Compile do
     {new_status, diagnostics1 ++ diagnostics2}
   end
 
-  # Loadpaths without checks because compilers may be defined in deps.
-  defp loadpaths! do
-    args = ["--no-elixir-version-check", "--no-deps-check", "--no-archives-check"]
-    Mix.Task.run("loadpaths", args)
-    Mix.Task.reenable("loadpaths")
-    Mix.Task.reenable("deps.loadpaths")
+  defp load_erl_config(opts) do
+    if path = opts[:erl_config] do
+      {:ok, terms} = :file.consult(path)
+      Application.put_all_env(terms, persistent: true)
+    end
   end
+
+  @impl true
+  def manifests do
+    Enum.flat_map(compilers(), fn compiler ->
+      module = Mix.Task.get("compile.#{compiler}")
+
+      if module && function_exported?(module, :manifests, 0) do
+        module.manifests
+      else
+        []
+      end
+    end)
+  end
+
+  ## Consolidation handling
 
   defp consolidate_protocols?(:ok), do: true
   defp consolidate_protocols?(:noop), do: not Mix.Tasks.Compile.Protocols.consolidated?()
@@ -168,43 +208,6 @@ defmodule Mix.Tasks.Compile do
 
       _ ->
         :ok
-    end
-  end
-
-  @doc """
-  Returns all compilers.
-  """
-  # TODO: Deprecate :xref on v1.12
-  def compilers(config \\ Mix.Project.config()) do
-    compilers = config[:compilers] || Mix.compilers()
-    List.delete(compilers, :xref)
-  end
-
-  @impl true
-  def manifests do
-    Enum.flat_map(compilers(), fn compiler ->
-      module = Mix.Task.get("compile.#{compiler}")
-
-      if module && function_exported?(module, :manifests, 0) do
-        module.manifests
-      else
-        []
-      end
-    end)
-  end
-
-  defp format(expression, args) do
-    :io_lib.format(expression, args) |> IO.iodata_to_binary()
-  end
-
-  defp first_line(doc) do
-    String.split(doc, "\n", parts: 2) |> hd |> String.trim() |> String.trim_trailing(".")
-  end
-
-  defp load_erl_config(opts) do
-    if path = opts[:erl_config] do
-      {:ok, terms} = :file.consult(path)
-      Application.put_all_env(terms, persistent: true)
     end
   end
 end

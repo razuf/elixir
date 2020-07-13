@@ -53,7 +53,8 @@ Elixir version | Supported Erlang/OTP versions
 1.7            | 19 - 22
 1.8            | 20 - 22
 1.9            | 20 - 22
-1.10           | 21 - 22
+1.10           | 21 - 22 (and Erlang/OTP 23 from v1.10.3)
+1.11           | 21 - 23
 
 While Elixir often adds compatibility to new Erlang/OTP versions on released branches, such as support for Erlang/OTP 20 in v1.4.5, those releases usually contain the minimum changes for Elixir to run without errors. Only the next minor release, in this case v1.5.0, does effectively leverage the new features provided by the latest Erlang/OTP release.
 
@@ -86,7 +87,6 @@ Version | Deprecated feature                                  | Replaced by (ava
 [v1.10] | Passing non-chardata to `Logger.log/2`              | Explicitly convert to string with `to_string/1` (v1.0)
 [v1.10] | `:compile_time_purge_level` in `Logger` app environment | `:compile_time_purge_matching` in `Logger` app environment (v1.7)
 [v1.10] | `Supervisor.Spec.supervise/2`                       | The new child specs outlined in `Supervisor` (v1.5)
-[v1.10] | `String.normalize/2`                                | `:unicode.characters_to_nfc_binary/1` or `:unicode.characters_to_nfd_binary/1` (Erlang/OTP 20)
 [v1.10] | `:simple_one_for_one` strategy in `Supervisor`      | `DynamicSupervisor` (v1.6)
 [v1.10] | `:restart` and `:shutdown` in `Task.Supervisor.start_link/1` | `:restart` and `:shutdown` in `Task.Supervisor.start_child/3` (v1.6)
 [v1.9]  | Enumerable keys in `Map.drop/2`, `Map.split/2`, and `Map.take/2` | Call `Enum.to_list/1` on the second argument before hand (v1.0)
@@ -110,9 +110,7 @@ Version | Deprecated feature                                  | Replaced by (ava
 [v1.7]  | `Registry.start_link/3`                             | `Registry.start_link/1` (v1.5)
 [v1.7]  | `Stream.chunk/2,3,4`                                | `Stream.chunk_every/2` and [`Stream.chunk_every/3,4`](`Stream.chunk_every/4`) (v1.5)
 [v1.6]  | `Enum.partition/2`                                  | `Enum.split_with/2` (v1.4)
-[v1.6]  | `Keyword.replace/3`                                 | `Keyword.fetch/2` + `Keyword.put/3` (v1.0)
 [v1.6]  | `Macro.unescape_tokens/1,2`                         | Use `Enum.map/2` to traverse over the arguments (v1.0)
-[v1.6]  | `Map.replace/3`                                     | `Map.fetch/2` + `Map.put/3` (v1.0)
 [v1.6]  | `Module.add_doc/6`                                  | [`@doc`](`Module`) module attribute (v1.0)
 [v1.6]  | `Range.range?/1`                                    | Pattern match on [`_.._`](`Kernel.../2`) (v1.0)
 [v1.5]  | `()` to mean `nil`                                  | `nil` (v1.0)

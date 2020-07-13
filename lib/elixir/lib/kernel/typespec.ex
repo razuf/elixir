@@ -84,7 +84,7 @@ defmodule Kernel.Typespec do
         store_typespec(bag, kind, expr, pos)
 
         case :ets.lookup(set, {:function, name, arity}) do
-          [{{:function, ^name, ^arity}, line, _, doc, doc_meta}] ->
+          [{{:function, ^name, ^arity}, _, line, _, doc, doc_meta}] ->
             store_doc(set, kind, name, arity, line, :doc, doc, doc_meta)
 
           _ ->
@@ -251,7 +251,13 @@ defmodule Kernel.Typespec do
           end
 
           if Map.has_key?(type_pairs, type_pair) do
-            compile_error(env, "type #{name}/#{arity} is already defined")
+            {error_full_path, error_line} = type_pairs[type_pair]
+            error_relative_path = Path.relative_to_cwd(error_full_path)
+
+            compile_error(
+              env,
+              "type #{name}/#{arity} is already defined in #{error_relative_path}:#{error_line}"
+            )
           end
 
           Map.put(type_pairs, type_pair, {file, line})

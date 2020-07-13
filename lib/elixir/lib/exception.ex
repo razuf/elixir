@@ -21,15 +21,15 @@ defmodule Exception do
 
   @typedoc "The kind handled by formatting functions"
   @type kind :: :error | non_error_kind
-  @typep non_error_kind :: :exit | :throw | {:EXIT, pid}
+  @type non_error_kind :: :exit | :throw | {:EXIT, pid}
 
   @type stacktrace :: [stacktrace_entry]
   @type stacktrace_entry ::
           {module, atom, arity_or_args, location}
           | {(... -> any), arity_or_args, location}
 
-  @typep arity_or_args :: non_neg_integer | list
-  @typep location :: keyword
+  @type arity_or_args :: non_neg_integer | list
+  @type location :: keyword
 
   @callback exception(term) :: t
   @callback message(t) :: String.t()
@@ -188,7 +188,7 @@ defmodule Exception do
   Where `definition` is `:def`, `:defp`, `:defmacro` or `:defmacrop`.
   """
   @doc since: "1.5.0"
-  @spec blame_mfa(module, function, args :: [term]) ::
+  @spec blame_mfa(module, function :: atom, args :: [term]) ::
           {:ok, :def | :defp | :defmacro | :defmacrop, [{args :: [term], guards :: [term]}]}
           | :error
   def blame_mfa(module, function, args)
@@ -237,7 +237,11 @@ defmodule Exception do
     binding = :orddict.store(:VAR, call_arg, binding)
 
     try do
-      {:value, _, binding} = :erl_eval.expr({:match, 0, erl_arg, {:var, 0, :VAR}}, binding, :none)
+      ann = :erl_anno.new(0)
+
+      {:value, _, binding} =
+        :erl_eval.expr({:match, ann, erl_arg, {:var, ann, :VAR}}, binding, :none)
+
       {true, binding}
     rescue
       _ -> {false, binding}
@@ -1329,7 +1333,7 @@ defmodule File.CopyError do
     formatted = IO.iodata_to_binary(:file.format_error(exception.reason))
 
     location =
-      case exception.on() do
+      case exception.on do
         "" -> ""
         on -> ". #{on}"
       end
@@ -1347,7 +1351,7 @@ defmodule File.RenameError do
     formatted = IO.iodata_to_binary(:file.format_error(exception.reason))
 
     location =
-      case exception.on() do
+      case exception.on do
         "" -> ""
         on -> ". #{on}"
       end

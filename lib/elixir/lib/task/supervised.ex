@@ -102,8 +102,8 @@ defmodule Task.Supervised do
           %{
             label: {Task.Supervisor, :terminating},
             report: %{
-              name: get_from(owner),
-              starter: self(),
+              name: self(),
+              starter: get_from(owner),
               function: fun,
               args: args,
               reason: {log_value(kind, value), __STACKTRACE__}
@@ -112,7 +112,8 @@ defmodule Task.Supervised do
           %{
             domain: [:otp, :elixir],
             error_logger: %{tag: :error_msg},
-            report_cb: &__MODULE__.format_report/1
+            report_cb: &__MODULE__.format_report/1,
+            callers: Process.get(:"$callers")
           }
         )
 

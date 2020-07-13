@@ -7,7 +7,7 @@ defmodule Application do
   programming languages, but with some additional characteristics.
 
   An application is a component implementing some specific functionality, with a
-  standardized directory structure, configuration, and lifecycle. Applications
+  standardized directory structure, configuration, and life cycle. Applications
   are *loaded*, *started*, and *stopped*. Each application also has its own
   environment, which provides a unified API for configuring each application.
 
@@ -84,8 +84,8 @@ defmodule Application do
 
   This approach has one big limitation: if you change the value of the
   application environment after the code is compiled, the value used at
-  runtime is not going to change! For example, if you are using `mix release`
-  and your `config/releases.exs` has:
+  runtime is not going to change! For example, if your `config/runtime.exs`
+  has:
 
       config :my_app, :db_host, "db.production"
 
@@ -171,7 +171,7 @@ defmodule Application do
   the documentation of `Mix.Tasks.Compile.App`, available as well by running
   `mix help compile.app`.
 
-  ## The application lifecycle
+  ## The application life cycle
 
   ### Loading applications
 
@@ -210,7 +210,7 @@ defmodule Application do
   dependencies for you.
 
   If the application does not have a callback module configured, starting is
-  done at this point. Otherwise, its `c:start/2` callback if invoked. The PID of
+  done at this point. Otherwise, its `c:start/2` callback is invoked. The PID of
   the top-level supervisor returned by this function is stored by the runtime
   for later use, and the returned application state is saved too, if any.
 
@@ -499,7 +499,7 @@ defmodule Application do
   Giving a path is useful to let Elixir know that only certain paths
   in a large configuration are compile time dependent.
   """
-  # TODO: Warn if get_env/fetch_env/fetch_env! is used at compile time instead of compile_env
+  # TODO: Warn on v1.14 if get_env/fetch_env/fetch_env! is used at compile time instead of compile_env
   @doc since: "1.10.0"
   @spec compile_env(app, key | list, value) :: value
   defmacro compile_env(app, key_or_path, default \\ nil) when is_atom(app) do
@@ -742,7 +742,6 @@ defmodule Application do
     :application.unset_env(app, key, opts)
   end
 
-  # TODO: turn warning into error on Elixir v2.0
   defp maybe_warn_on_app_env_key(_app, key) when is_atom(key),
     do: :ok
 

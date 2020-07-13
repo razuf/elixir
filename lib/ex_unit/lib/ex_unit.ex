@@ -128,7 +128,7 @@ defmodule ExUnit do
   end
 
   defmodule TestCase do
-    # TODO: Remove this module on v2.0 (it has been replacede by TestModule)
+    # TODO: Remove this module on v2.0 (it has been replaced by TestModule)
     @moduledoc false
     defstruct [:name, :state, tests: []]
 
@@ -227,7 +227,7 @@ defmodule ExUnit do
       * `:diff_insert` - color of the insertions on diffs, defaults to `:green`;
       * `:diff_insert_whitespace` - color of the whitespace insertions on diffs,
         defaults to `IO.ANSI.color_background(2, 0, 0)`;
-      * `:diff_delete` - color of the deletiopns on diffs, defaults to `:red`;
+      * `:diff_delete` - color of the deletions on diffs, defaults to `:red`;
       * `:diff_delete_whitespace` - color of the whitespace deletions on diffs,
         defaults to `IO.ANSI.color_background(0, 2, 0)`;
 
@@ -358,6 +358,32 @@ defmodule ExUnit do
   def after_suite(function) when is_function(function) do
     current_callbacks = Application.fetch_env!(:ex_unit, :after_suite)
     configure(after_suite: [function | current_callbacks])
+  end
+
+  @doc """
+  Fetches the test supervisor for the current test.
+
+  Returns `{:ok, supervisor_pid}` or `:error` if not called from the test process.
+
+  This is the same supervisor as used by `ExUnit.Callbacks.start_supervised/2`
+  and similar, see `ExUnit.Callbacks` module documentation for more information.
+  """
+  @doc since: "1.11.0"
+  @spec fetch_test_supervisor() :: {:ok, pid()} | :error
+  def fetch_test_supervisor() do
+    case ExUnit.OnExitHandler.get_supervisor(self()) do
+      {:ok, nil} ->
+        opts = [strategy: :one_for_one, max_restarts: 1_000_000, max_seconds: 1]
+        {:ok, sup} = Supervisor.start_link([], opts)
+        ExUnit.OnExitHandler.put_supervisor(self(), sup)
+        {:ok, sup}
+
+      {:ok, _} = ok ->
+        ok
+
+      :error ->
+        :error
+    end
   end
 
   # Persists default values in application

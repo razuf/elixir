@@ -1337,12 +1337,12 @@ defmodule Enum do
   end
 
   @doc """
-  Joins the given `enumerable` into a binary using `joiner` as a
+  Joins the given `enumerable` into a string using `joiner` as a
   separator.
 
-  If `joiner` is not passed at all, it defaults to the empty binary.
+  If `joiner` is not passed at all, it defaults to an empty string.
 
-  All elements in the `enumerable` must be convertible to a binary,
+  All elements in the `enumerable` must be convertible to a string,
   otherwise an error is raised.
 
   ## Examples
@@ -1476,12 +1476,10 @@ defmodule Enum do
   @doc """
   Maps and joins the given `enumerable` in one pass.
 
-  `joiner` can be either a binary or a list and the result will be of
-  the same type as `joiner`.
-  If `joiner` is not passed at all, it defaults to an empty binary.
+  If `joiner` is not passed at all, it defaults to an empty string.
 
   All elements returned from invoking the `mapper` must be convertible to
-  a binary, otherwise an error is raised.
+  a string, otherwise an error is raised.
 
   ## Examples
 
@@ -1534,6 +1532,7 @@ defmodule Enum do
   end
 
   @doc false
+  @spec max(t, (() -> empty_result)) :: element | empty_result when empty_result: any
   def max(enumerable, empty_fallback) when is_function(empty_fallback, 0) do
     max(enumerable, &>=/2, empty_fallback)
   end
@@ -1580,7 +1579,9 @@ defmodule Enum do
       0
 
   """
-  @spec max(t, (() -> empty_result)) :: element | empty_result when empty_result: any
+  @spec max(t, (element, element -> boolean) | module()) ::
+          element | empty_result
+        when empty_result: any
   @spec max(t, (element, element -> boolean) | module(), (() -> empty_result)) ::
           element | empty_result
         when empty_result: any
@@ -1592,6 +1593,8 @@ defmodule Enum do
   defp max_sort_fun(module) when is_atom(module), do: &(module.compare(&1, &2) != :lt)
 
   @doc false
+  @spec max_by(t, (element -> any), (() -> empty_result)) :: element | empty_result
+        when empty_result: any
   def max_by(enumerable, fun, empty_fallback)
       when is_function(fun, 1) and is_function(empty_fallback, 0) do
     max_by(enumerable, fun, &>=/2, empty_fallback)
@@ -1641,7 +1644,11 @@ defmodule Enum do
       nil
 
   """
-  @spec max_by(t, (element -> any), (() -> empty_result)) :: element | empty_result
+  @spec max_by(
+          t,
+          (element -> any),
+          (element, element -> boolean) | module()
+        ) :: element | empty_result
         when empty_result: any
   @spec max_by(
           t,
@@ -1699,6 +1706,7 @@ defmodule Enum do
   end
 
   @doc false
+  @spec min(t, (() -> empty_result)) :: element | empty_result when empty_result: any
   def min(enumerable, empty_fallback) when is_function(empty_fallback, 0) do
     min(enumerable, &<=/2, empty_fallback)
   end
@@ -1745,7 +1753,9 @@ defmodule Enum do
       0
 
   """
-  @spec min(t, (() -> empty_result)) :: element | empty_result when empty_result: any
+  @spec min(t, (element, element -> boolean) | module()) ::
+          element | empty_result
+        when empty_result: any
   @spec min(t, (element, element -> boolean) | module(), (() -> empty_result)) ::
           element | empty_result
         when empty_result: any
@@ -1757,6 +1767,8 @@ defmodule Enum do
   defp min_sort_fun(module) when is_atom(module), do: &(module.compare(&1, &2) != :gt)
 
   @doc false
+  @spec min_by(t, (element -> any), (() -> empty_result)) :: element | empty_result
+        when empty_result: any
   def min_by(enumerable, fun, empty_fallback)
       when is_function(fun, 1) and is_function(empty_fallback, 0) do
     min_by(enumerable, fun, &<=/2, empty_fallback)
@@ -1806,7 +1818,11 @@ defmodule Enum do
       nil
 
   """
-  @spec min_by(t, (element -> any), (() -> empty_result)) :: element | empty_result
+  @spec min_by(
+          t,
+          (element -> any),
+          (element, element -> boolean) | module()
+        ) :: element | empty_result
         when empty_result: any
   @spec min_by(
           t,
@@ -1860,15 +1876,20 @@ defmodule Enum do
     end
   end
 
+  @doc false
+  @spec min_max_by(t, (element -> any), (() -> empty_result)) :: {element, element} | empty_result
+        when empty_result: any
+  def min_max_by(enumerable, fun, empty_fallback)
+      when is_function(fun, 1) and is_function(empty_fallback, 0) do
+    min_max_by(enumerable, fun, &</2, empty_fallback)
+  end
+
   @doc """
   Returns a tuple with the minimal and the maximal elements in the
   enumerable as calculated by the given function.
 
   If multiple elements are considered maximal or minimal, the first one
   that was found is returned.
-
-  Calls the provided `empty_fallback` function and returns its value if
-  `enumerable` is empty. The default `empty_fallback` raises `Enum.EmptyError`.
 
   ## Examples
 
@@ -1881,11 +1902,56 @@ defmodule Enum do
       iex> Enum.min_max_by([], &String.length/1, fn -> {nil, nil} end)
       {nil, nil}
 
+  The fact this function uses Erlang's term ordering means that the
+  comparison is structural and not semantic. Therefore, if you want
+  to compare structs, most structs provide a "compare" function, such as
+  `Date.compare/2`, which receives two structs and returns `:lt` (less than),
+  `:eq` (equal), and `:gt` (greater than). If you pass a module as the
+  sorting function, Elixir will automatically use the `compare/2` function
+  of said module:
+
+      iex> users = [
+      ...>   %{name: "Ellis", birthday: ~D[1943-05-11]},
+      ...>   %{name: "Lovelace", birthday: ~D[1815-12-10]},
+      ...>   %{name: "Turing", birthday: ~D[1912-06-23]}
+      ...> ]
+      iex> Enum.min_max_by(users, &(&1.birthday), Date)
+      {
+        %{name: "Lovelace", birthday: ~D[1815-12-10]},
+        %{name: "Ellis", birthday: ~D[1943-05-11]}
+      }
+
+  Finally, if you don't want to raise on empty enumerables, you can pass
+  the empty fallback:
+
+      iex> Enum.min_max_by([], &String.length/1, fn -> nil end)
+      nil
+
   """
-  @spec min_max_by(t, (element -> any), (() -> empty_result)) :: {element, element} | empty_result
+  @spec min_max_by(t, (element -> any), (element, element -> boolean) | module()) ::
+          {element, element} | empty_result
         when empty_result: any
-  def min_max_by(enumerable, fun, empty_fallback \\ fn -> raise Enum.EmptyError end)
-      when is_function(fun, 1) and is_function(empty_fallback, 0) do
+  @spec min_max_by(
+          t,
+          (element -> any),
+          (element, element -> boolean) | module(),
+          (() -> empty_result)
+        ) :: {element, element} | empty_result
+        when empty_result: any
+  def min_max_by(
+        enumerable,
+        fun,
+        sorter_or_empty_fallback \\ &</2,
+        empty_fallback \\ fn -> raise Enum.EmptyError end
+      )
+
+  def min_max_by(enumerable, fun, sorter, empty_fallback)
+      when is_function(fun, 1) and is_atom(sorter) and is_function(empty_fallback, 0) do
+    min_max_by(enumerable, fun, min_max_by_sort_fun(sorter), empty_fallback)
+  end
+
+  def min_max_by(enumerable, fun, sorter, empty_fallback)
+      when is_function(fun, 1) and is_function(sorter, 2) and is_function(empty_fallback, 0) do
     first_fun = fn entry ->
       fun_entry = fun.(entry)
       {entry, entry, fun_entry, fun_entry}
@@ -1895,10 +1961,10 @@ defmodule Enum do
       fun_entry = fun.(entry)
 
       cond do
-        fun_entry < fun_min ->
+        sorter.(fun_entry, fun_min) ->
           {entry, prev_max, fun_entry, fun_max}
 
-        fun_entry > fun_max ->
+        sorter.(fun_max, fun_entry) ->
           {prev_min, entry, fun_min, fun_entry}
 
         true ->
@@ -1911,6 +1977,8 @@ defmodule Enum do
       {min, max, _, _} -> {min, max}
     end
   end
+
+  defp min_max_by_sort_fun(module) when is_atom(module), do: &(module.compare(&1, &2) == :lt)
 
   @doc """
   Splits the `enumerable` in two lists according to the given function `fun`.
@@ -2508,7 +2576,7 @@ defmodule Enum do
 
   For this reason, most structs provide a "compare" function, such as
   `Date.compare/2`, which receives two structs and returns `:lt` (less than),
-  `:eq` (equal), and `:gt` (greather than). If you pass a module as the
+  `:eq` (equal), and `:gt` (greater than). If you pass a module as the
   sorting function, Elixir will automatically use the `compare/2` function
   of said module:
 
@@ -3086,10 +3154,18 @@ defmodule Enum do
   """
   @spec with_index(t, integer) :: [{element, index}]
   def with_index(enumerable, offset \\ 0) do
-    map_reduce(enumerable, offset, fn x, acc ->
-      {{x, acc}, acc + 1}
-    end)
-    |> elem(0)
+    enumerable
+    |> to_list()
+    |> do_with_index(offset)
+  end
+
+  @spec do_with_index(list, integer) :: [{element, index}]
+  defp do_with_index([], _) do
+    []
+  end
+
+  defp do_with_index([head | tail], index) do
+    [{head, index} | do_with_index(tail, index + 1)]
   end
 
   @doc """

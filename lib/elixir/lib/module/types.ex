@@ -165,10 +165,10 @@ defmodule Module.Types do
 
   defp do_lift_type({:map, pairs}, context) do
     {pairs, context} =
-      Enum.map_reduce(pairs, context, fn {key, value}, context ->
+      Enum.map_reduce(pairs, context, fn {kind, key, value}, context ->
         {key, context} = do_lift_type(key, context)
         {value, context} = do_lift_type(value, context)
-        {{key, value}, context}
+        {{kind, key, value}, context}
       end)
 
     {{:map, pairs}, context}
@@ -194,27 +194,153 @@ defmodule Module.Types do
 
   ## ERROR FORMATTING
 
-  def format_warning({:unable_unify, left, right, expr, traces}) do
-    [
-      "incompatible types:\n\n    ",
-      format_type(left),
-      " !~ ",
-      format_type(right),
-      "\n\n",
-      format_expr(expr),
-      format_traces(traces),
-      "Conflict found at"
-    ]
+  def format_warning({:unable_unify, left, right, {location, expr, traces}}) do
+    cond do
+      (match?({:ok, _}, map_dot(expr)) and (map_type?(left) and atom_type?(right))) or
+          (atom_type?(left) and map_type?(right)) ->
+        {:ok, {map, field}} = map_dot(expr)
+
+        """
+        parentheses are required when dynamically invoking zero-arity functions \
+        #{format_expr(expr, location)}\
+        "#{expr_to_string(map)}" is an atom and you attempted to fetch the field \
+        #{field}. Make sure that "#{expr_to_string(map)}" is a map or add parentheses \
+        to invoke a function instead:
+
+            #{indent(expr_to_string(invert_parens(expr)))}
+
+        Conflict found at\
+        """
+
+      (match?({:ok, _}, remote_call(expr)) and (map_type?(left) and atom_type?(right))) or
+          (atom_type?(left) and map_type?(right)) ->
+        {:ok, {module, fun}} = remote_call(expr)
+
+        """
+        parentheses are not allowed when fetching fields from a map \
+        #{format_expr(expr, location)}\
+        "#{expr_to_string(module)}" is a map and you attempted to invoke the function \
+        #{fun}/0. Make sure that "#{expr_to_string(module)}" is an atom or remove \
+        parentheses to fetch a field:
+
+            #{indent(expr_to_string(invert_parens(expr)))}
+
+        Conflict found at\
+        """
+
+      map_type?(left) and map_type?(right) and match?({:ok, _}, missing_field(left, right)) ->
+        {:ok, atom} = missing_field(left, right)
+
+        # Drop the last trace which is the expression map.foo
+        traces = Enum.drop(traces, 1)
+
+        [
+          "undefined field \"#{atom}\" ",
+          format_expr(expr, location),
+          format_traces(traces),
+          "Conflict found at"
+        ]
+
+      true ->
+        [
+          "incompatible types:\n\n    ",
+          format_types(left, right),
+          "\n\n",
+          format_expr(expr, location),
+          format_traces(traces),
+          "Conflict found at"
+        ]
+    end
   end
 
-  defp format_expr(nil) do
+  defp map_dot(expr) do
+    with {{:., _meta1, [map, field]}, meta2, []} <- expr,
+         true <- Keyword.get(meta2, :no_parens, false) do
+      {:ok, {map, field}}
+    else
+      _ -> :error
+    end
+  end
+
+  defp remote_call(expr) do
+    with {{:., _meta1, [module, field]}, meta2, []} <- expr,
+         false <- Keyword.get(meta2, :no_parens, false) do
+      {:ok, {module, field}}
+    else
+      _ -> :error
+    end
+  end
+
+  defp invert_parens({{:., meta1, [expr1, expr2]}, meta2, []}) do
+    {{:., meta1, [expr1, expr2]}, Keyword.update(meta2, :no_parens, true, &not/1), []}
+  end
+
+  defp missing_field(
+         {:map, [{:required, {:atom, atom} = type, _}, {:optional, :dynamic, :dynamic}]},
+         {:map, fields}
+       ) do
+    if List.keymember?(fields, type, 1) do
+      :error
+    else
+      {:ok, atom}
+    end
+  end
+
+  defp missing_field(
+         {:map, fields},
+         {:map, [{:required, {:atom, atom} = type, _}, {:optional, :dynamic, :dynamic}]}
+       ) do
+    if List.keymember?(fields, type, 1) do
+      :error
+    else
+      {:ok, atom}
+    end
+  end
+
+  defp format_types(left, right) do
+    cond do
+      map_type?(left) and not map_type?(right) ->
+        [format_simplified_map(left), " !~ ", format_type(right)]
+
+      not map_type?(left) and map_type?(right) ->
+        [format_type(left), " !~ ", format_simplified_map(right)]
+
+      true ->
+        [format_type(left), " !~ ", format_type(right)]
+    end
+  end
+
+  defp map_type?({:map, _}), do: true
+  defp map_type?(_other), do: false
+
+  defp atom_type?(:atom), do: true
+  defp atom_type?(:boolean), do: true
+  defp atom_type?({:atom, _}), do: false
+  defp atom_type?(_other), do: false
+
+  defp format_simplified_map({:map, pairs}) do
+    case List.keyfind(pairs, {:atom, :__struct__}, 1) do
+      {:required, {:atom, :__struct__}, {:atom, struct}} ->
+        "%#{inspect(struct)}{}"
+
+      {:required, {:atom, :__struct__}, {:var, _} = var} ->
+        "%#{format_type(var)}{}"
+
+      _ ->
+        "map()"
+    end
+  end
+
+  defp format_expr(nil, _location) do
     []
   end
 
-  defp format_expr(expr) do
+  defp format_expr(expr, location) do
     [
-      "in expression:\n\n    ",
-      expr_to_string(expr),
+      "in expression:\n\n    # ",
+      format_location(location),
+      "    ",
+      indent(expr_to_string(expr)),
       "\n\n"
     ]
   end
@@ -234,7 +360,7 @@ defmodule Module.Types do
           " in:\n\n    # ",
           format_location(location),
           "    ",
-          expr_to_string(expr),
+          indent(expr_to_string(expr)),
           "\n\n"
         ]
 
@@ -247,10 +373,14 @@ defmodule Module.Types do
           "\" in:\n\n    # ",
           format_location(location),
           "    ",
-          expr_to_string(expr),
+          indent(expr_to_string(expr)),
           "\n\n"
         ]
     end)
+  end
+
+  defp format_location({file, line, _mfa}) do
+    format_location({file, line})
   end
 
   defp format_location({file, line}) do
@@ -273,11 +403,11 @@ defmodule Module.Types do
   end
 
   def format_type({:map, pairs}) do
-    case List.keytake(pairs, :__struct__, 0) do
-      {{:__struct__, struct}, pairs} ->
+    case List.keytake(pairs, {:atom, :__struct__}, 1) do
+      {{:required, {:atom, :__struct__}, {:atom, struct}}, pairs} ->
         "%#{inspect(struct)}{#{format_map_pairs(pairs)}}"
 
-      nil ->
+      _ ->
         "%{#{format_map_pairs(pairs)}}"
     end
   end
@@ -295,8 +425,18 @@ defmodule Module.Types do
   end
 
   defp format_map_pairs(pairs) do
-    Enum.map_join(pairs, ", ", fn {left, right} ->
-      "#{format_type(left)} => #{format_type(right)}"
+    {atoms, others} = Enum.split_with(pairs, &match?({:required, {:atom, _}, _}, &1))
+    {required, optional} = Enum.split_with(others, &match?({:required, _, _}, &1))
+
+    Enum.map_join(atoms ++ required ++ optional, ", ", fn
+      {:required, {:atom, atom}, right} ->
+        "#{atom}: #{format_type(right)}"
+
+      {:required, left, right} ->
+        "#{format_type(left)} => #{format_type(right)}"
+
+      {:optional, left, right} ->
+        "optional(#{format_type(left)}) => #{format_type(right)}"
     end)
   end
 
@@ -305,22 +445,25 @@ defmodule Module.Types do
     expr
     |> reverse_rewrite()
     |> Macro.to_string()
-    |> String.replace("\n", "\n    ")
+  end
+
+  defp indent(string) do
+    String.replace(string, "\n", "    \n")
   end
 
   defp reverse_rewrite(guard) do
     Macro.prewalk(guard, fn
       {:., _, [:erlang, :orelse]} -> :or
       {:., _, [:erlang, :andalso]} -> :and
-      {{:., _, [mod, fun]}, _, args} -> erl_to_ex(mod, fun, args)
+      {{:., _, [mod, fun]}, meta, args} -> erl_to_ex(mod, fun, args, meta)
       other -> other
     end)
   end
 
-  defp erl_to_ex(mod, fun, args) do
+  defp erl_to_ex(mod, fun, args, meta) do
     case :elixir_rewrite.erl_to_ex(mod, fun, args) do
-      {Kernel, fun, args} -> {fun, [], args}
-      {mod, fun, args} -> {{:., [], [mod, fun]}, [], args}
+      {Kernel, fun, args} -> {fun, meta, args}
+      {mod, fun, args} -> {{:., [], [mod, fun]}, meta, args}
     end
   end
 end

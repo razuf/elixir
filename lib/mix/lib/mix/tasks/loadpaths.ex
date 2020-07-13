@@ -1,16 +1,11 @@
 defmodule Mix.Tasks.Loadpaths do
   use Mix.Task
 
-  @moduledoc false
-
-  @doc """
+  @moduledoc """
   Loads the application and its dependencies paths.
 
   This task is never directly invoked from the command line,
   but it is rather used as building block by other tasks.
-
-  See `Mix.Project.compile/2` which may compile or simply
-  invoke this task based on a flag.
 
   ## Configuration
 
@@ -36,9 +31,9 @@ defmodule Mix.Tasks.Loadpaths do
       Mix.Task.run("archive.check", args)
     end
 
-    # --no-deps is used only internally. It has no purpose
-    # from Mix.CLI because running a task may load deps.
-    unless "--no-deps" in args do
+    # --no-deps-loading is used only internally. It has no
+    # purpose from Mix.CLI because running a task may load deps.
+    unless "--no-deps-loading" in args do
       Mix.Task.run("deps.loadpaths", args)
     end
 

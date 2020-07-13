@@ -3,7 +3,7 @@ defmodule Registry do
   A local, decentralized and scalable key-value process storage.
 
   It allows developers to lookup one or more processes with a given key.
-  If the registry has `:unique` keys, a key points to 0 or 1 processes.
+  If the registry has `:unique` keys, a key points to 0 or 1 process.
   If the registry allows `:duplicate` keys, a single key may point to any
   number of processes. In both cases, different keys could identify the
   same process.
@@ -204,7 +204,7 @@ defmodule Registry do
   @type guards :: [guard]
 
   @typedoc "A pattern used to representing the output format part of a match spec"
-  @type body :: [atom | tuple]
+  @type body :: [term]
 
   @typedoc "A full match spec used when selecting objects in the registry"
   @type spec :: [{match_pattern, guards, body}]
@@ -784,7 +784,8 @@ defmodule Registry do
   end
 
   @doc """
-  Unregister entries for a given key matching a pattern.
+  Unregisters entries for keys matching a pattern associated to the current
+  process in `registry`.
 
   ## Examples
 

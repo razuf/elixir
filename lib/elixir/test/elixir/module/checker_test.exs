@@ -639,6 +639,31 @@ defmodule Module.CheckerTest do
       assert_warnings(files, warning)
     end
 
+    test "reports imported functions" do
+      files = %{
+        "a.ex" => """
+        defmodule A do
+          @deprecated "oops"
+          def a, do: :ok
+        end
+        """,
+        "b.ex" => """
+        defmodule B do
+          import A
+          def b, do: a()
+        end
+        """
+      }
+
+      warning = """
+      warning: A.a/0 is deprecated. oops
+        b.ex:3: B.b/0
+
+      """
+
+      assert_warnings(files, warning)
+    end
+
     test "reports structs" do
       files = %{
         "a.ex" => """
@@ -719,6 +744,7 @@ defmodule Module.CheckerTest do
 
       in expression:
 
+          # a.ex:2
           var = "abc"
 
       where "var" was given the type binary() in:
@@ -755,6 +781,7 @@ defmodule Module.CheckerTest do
 
       in expression:
 
+          # a.ex:2
           <<var::integer(), var::binary()>>
 
       where "var" was given the type binary() in:
@@ -791,6 +818,7 @@ defmodule Module.CheckerTest do
 
       in expression:
 
+          # a.ex:2
           {var} = var
 
       where "var" was given the type {var0} in:
@@ -822,6 +850,7 @@ defmodule Module.CheckerTest do
 
       in expression:
 
+          # a.ex:2
           is_integer(var) and is_binary(var)
 
       where "var" was given the type binary() in:
@@ -858,6 +887,7 @@ defmodule Module.CheckerTest do
 
       in expression:
 
+          # a.ex:2
           is_integer(x) and is_binary(y)
 
       where "x" was given the type integer() in:
@@ -899,6 +929,7 @@ defmodule Module.CheckerTest do
 
       in expression:
 
+          # a.ex:2
           is_integer(x) and is_binary(y) and is_boolean(z)
 
       where "x" was given the type integer() in:
@@ -940,6 +971,7 @@ defmodule Module.CheckerTest do
 
       in expression:
 
+          # a.ex:2
           :foo = x
 
       where \"x\" was given the type :foo in:
@@ -976,6 +1008,7 @@ defmodule Module.CheckerTest do
 
       in expression:
 
+          # a.ex:2
           <<foo>>
 
       where \"foo\" was given the type integer() in:
@@ -1010,6 +1043,7 @@ defmodule Module.CheckerTest do
 
       in expression:
 
+          # a.ex:2
           <<foo::integer()>>
 
       where \"foo\" was given the type integer() in:
@@ -1024,6 +1058,171 @@ defmodule Module.CheckerTest do
 
       Conflict found at
         a.ex:2: A.a/1
+
+      """
+
+      assert_warnings(files, warning)
+    end
+  end
+
+  describe "map checks" do
+    test "show map() when comparing against non-map" do
+      files = %{
+        "a.ex" => """
+        defmodule A do
+          def a(foo) do
+            foo.bar
+            :atom = foo
+          end
+        end
+        """
+      }
+
+      warning = """
+      warning: incompatible types:
+
+          map() !~ :atom
+
+      in expression:
+
+          # a.ex:4
+          :atom = foo
+
+      where "foo" was given the type :atom in:
+
+          # a.ex:4
+          :atom = foo
+
+      where "foo" was given the type %{bar: var1, optional(dynamic()) => dynamic()} in:
+
+          # a.ex:3
+          foo.bar
+
+      Conflict found at
+        a.ex:4: A.a/1
+
+      """
+
+      assert_warnings(files, warning)
+    end
+
+    test "use module as map (without parentheses)" do
+      files = %{
+        "a.ex" => """
+        defmodule A do
+          def a(foo) do
+            %module{} = foo
+            module.__struct__
+          end
+        end
+        """
+      }
+
+      warning = """
+      warning: parentheses are required when dynamically invoking zero-arity functions in expression:
+
+          # a.ex:4
+          module.__struct__
+
+      "module" is an atom and you attempted to fetch the field __struct__. Make sure that \
+      "module" is a map or add parentheses to invoke a function instead:
+
+          module.__struct__()
+
+      Conflict found at
+        a.ex:4: A.a/1
+
+      """
+
+      assert_warnings(files, warning)
+    end
+
+    test "use map as module (with parentheses)" do
+      files = %{
+        "a.ex" => """
+        defmodule A do
+          def a(foo) when is_map(foo) do
+            foo.__struct__()
+          end
+        end
+        """
+      }
+
+      warning = """
+      warning: parentheses are not allowed when fetching fields from a map in expression:
+
+          # a.ex:3
+          foo.__struct__()
+
+      "foo" is a map and you attempted to invoke the function __struct__/0. Make sure that \
+      "foo" is an atom or remove parentheses to fetch a field:
+
+          foo.__struct__
+
+      Conflict found at
+        a.ex:3: A.a/1
+
+      """
+
+      assert_warnings(files, warning)
+    end
+
+    test "non-existant map field warning" do
+      files = %{
+        "a.ex" => """
+        defmodule A do
+          def a() do
+            map = %{foo: 1}
+            map.bar
+          end
+        end
+        """
+      }
+
+      warning = """
+      warning: undefined field "bar" in expression:
+
+          # a.ex:4
+          map.bar
+
+      where "map" was given the type %{foo: integer()} in:
+
+          # a.ex:3
+          map = %{foo: 1}
+
+      Conflict found at
+        a.ex:4: A.a/0
+
+      """
+
+      assert_warnings(files, warning)
+    end
+
+    test "non-existant struct field warning" do
+      files = %{
+        "a.ex" => """
+        defmodule A do
+          def a(foo) do
+            %File.Stat{} = foo
+            foo.bar
+          end
+        end
+        """
+      }
+
+      warning = """
+      warning: undefined field "bar" in expression:
+
+          # a.ex:4
+          foo.bar
+
+      where "foo" was given the type %File.Stat{} in:
+
+          # a.ex:3
+          %File.Stat{} = foo
+
+      Conflict found at
+        a.ex:4: A.a/1
 
       """
 

@@ -92,7 +92,7 @@ dispatch_import(Meta, Name, Args, E, Callback) ->
     {ok, Receiver, Quoted} ->
       expand_quoted(Meta, Receiver, Name, Arity, Quoted, E);
     {ok, Receiver, NewName, NewArgs} ->
-      elixir_expand:expand({{'.', [], [Receiver, NewName]}, Meta, NewArgs}, E);
+      elixir_expand:expand({{'.', Meta, [Receiver, NewName]}, Meta, NewArgs}, E);
     error ->
       Callback()
   end.
@@ -315,20 +315,29 @@ is_ensure_loaded(Receiver) ->
 %% Do not try to get macros from Erlang. Speeds up compilation a bit.
 get_macros(erlang, _) -> [];
 
+%% Module was not required, so we don't try to load it.
 get_macros(Receiver, false) ->
   case erlang:module_loaded(Receiver) of
     true -> get_info(Receiver, macros);
     false -> []
   end;
 
+%% If module was required, do a function call to force
+%% the error handler in.
 get_macros(Receiver, true) ->
-  case is_ensure_loaded(Receiver) of
-    true -> get_info(Receiver, macros);
-    false -> []
+  try
+    Receiver:'__info__'(macros)
+  catch
+    error:_ -> []
   end.
 
+%% Deprecations checks only happen at the module body,
+%% so in there we can try to at least load the module.
 get_deprecations(Receiver) ->
-  get_info(Receiver, deprecated).
+  case is_ensure_loaded(Receiver) of
+    true -> get_info(Receiver, deprecated);
+    false -> []
+  end.
 
 get_info(Receiver, Key) ->
   case erlang:function_exported(Receiver, '__info__', 1) of
@@ -358,30 +367,19 @@ elixir_imported_macros() ->
 
 check_deprecated(_, erlang, _, _, _) ->
   ok;
-check_deprecated(Meta, ?kernel, to_char_list, 1, E) ->
-  elixir_errors:form_warn(Meta, E, ?MODULE, {deprecated, ?kernel, to_char_list, 1, "Use Kernel.to_charlist/1 instead"});
 check_deprecated(_, ?kernel, _, _, _) ->
   ok;
 check_deprecated(Meta, Receiver, Name, Arity, E) ->
-  case (?key(E, function) == nil) andalso is_ensure_loaded(Receiver) of
-    true ->
-      case check_deprecated(Receiver, Name, Arity, get_deprecations(Receiver)) of
-        %% TODO: Remove me when Elixir.HashDict is removed
-        Other when is_tuple(Other), map_get(module, E) /= 'Elixir.HashDict' ->
-          elixir_errors:form_warn(Meta, E, ?MODULE, Other);
+  case (?key(E, function) == nil) andalso get_deprecations(Receiver) of
+    [_ | _] = Deprecations ->
+      case lists:keyfind({Name, Arity}, 1, Deprecations) of
+        {_, Message} ->
+          elixir_errors:form_warn(Meta, E, ?MODULE, {deprecated, Receiver, Name, Arity, Message});
 
-        _ ->
-          ok
+        false ->
+          false
       end;
 
-    false ->
+    _ ->
       ok
   end.
-
-check_deprecated(Mod, Fun, Arity, [_ | _] = Deprecated) ->
-  case lists:keyfind({Fun, Arity}, 1, Deprecated) of
-    {_, Message} -> {deprecated, Mod, Fun, Arity, Message};
-    false -> false
-  end;
-check_deprecated(_, _, _, _) ->
-  false.

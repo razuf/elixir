@@ -312,9 +312,14 @@ defmodule System do
   """
   @spec user_home() :: String.t() | nil
   def user_home do
-    {:ok, [[home] | _]} = :init.get_argument(:home)
-    encoding = :file.native_name_encoding()
-    :unicode.characters_to_binary(home, encoding, encoding)
+    case :init.get_argument(:home) do
+      {:ok, [[home] | _]} ->
+        encoding = :file.native_name_encoding()
+        :unicode.characters_to_binary(home, encoding, encoding)
+
+      _ ->
+        nil
+    end
   end
 
   @doc """
@@ -393,8 +398,9 @@ defmodule System do
   @doc """
   Registers a program exit handler function.
 
-  Registers a function that will be invoked at the end of program execution.
-  Useful for invoking a hook in "script" mode.
+  Registers a function that will be invoked at the end of an Elixir script.
+  A script is typically started via the command line via the `elixir` and
+  `mix` executables.
 
   The handler always executes in a different process from the one it was
   registered in. As a consequence, any resources managed by the calling process
@@ -402,6 +408,9 @@ defmodule System do
   function is invoked.
 
   The function must receive the exit status code as an argument.
+
+  If the VM terminates programmatically, via `System.stop/1` or `System.halt/1`,
+  the `at_exit/1` callbacks are not executed.
   """
   @spec at_exit((non_neg_integer -> any)) :: :ok
   def at_exit(fun) when is_function(fun, 1) do
@@ -582,15 +591,20 @@ defmodule System do
   `__STACKTRACE__/0` inside a rescue/catch. If you want to support
   earlier Elixir versions, move `System.stacktrace/0` inside a rescue/catch.
 
+  Starting from Erlang/OTP 23, this function will always return an empty list.
+
   Note that the Erlang VM (and therefore this function) does not
   return the current stacktrace but rather the stacktrace of the
   latest exception. To retrieve the stacktrace of the current process,
   use `Process.info(self(), :current_stacktrace)` instead.
   """
+  # TODO: Once Erlang/OTP 23 is required, remove conditional, and update @doc accordingly.
   # The warning is emitted by the compiler - so a @doc annotation is enough
   @doc deprecated: "Use __STACKTRACE__ instead"
-  def stacktrace do
-    apply(:erlang, :get_stacktrace, [])
+  if function_exported?(:erlang, :get_stacktrace, 0) do
+    def stacktrace, do: apply(:erlang, :get_stacktrace, [])
+  else
+    def stacktrace, do: []
   end
 
   @doc """
@@ -623,6 +637,7 @@ defmodule System do
       System.halt(:abort)
 
   """
+  @spec halt() :: no_return
   @spec halt(non_neg_integer | binary | :abort) :: no_return
   def halt(status \\ 0)
 

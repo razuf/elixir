@@ -436,7 +436,7 @@ defmodule Kernel.WarningTest do
                defp b(arg1 \\ 1, arg2 \\ 2, arg3 \\ 3), do: [arg1, arg2, arg3]
              end
              """)
-           end) =~ "default arguments in b/3 are never used\n  nofile:3"
+           end) =~ "default values for the optional arguments in b/3 are never used\n  nofile:3"
 
     assert capture_err(fn ->
              Code.eval_string(~S"""
@@ -445,7 +445,8 @@ defmodule Kernel.WarningTest do
                defp b(arg1 \\ 1, arg2 \\ 2, arg3 \\ 3), do: [arg1, arg2, arg3]
              end
              """)
-           end) =~ "the first 2 default arguments in b/3 are never used\n  nofile:3"
+           end) =~
+             "the default values for the first 2 optional arguments in b/3 are never used\n  nofile:3"
 
     assert capture_err(fn ->
              Code.eval_string(~S"""
@@ -454,7 +455,8 @@ defmodule Kernel.WarningTest do
                defp b(arg1 \\ 1, arg2 \\ 2, arg3 \\ 3), do: [arg1, arg2, arg3]
              end
              """)
-           end) =~ "the first default argument in b/3 is never used\n  nofile:3"
+           end) =~
+             "the default value for the first optional argument in b/3 is never used\n  nofile:3"
 
     assert capture_err(fn ->
              Code.eval_string(~S"""
@@ -474,7 +476,7 @@ defmodule Kernel.WarningTest do
                defp b(arg1, arg2, arg3), do: [arg1, arg2, arg3]
              end
              """)
-           end) =~ "default arguments in b/3 are never used\n  nofile:3"
+           end) =~ "default values for the optional arguments in b/3 are never used\n  nofile:3"
 
     assert capture_err(fn ->
              Code.eval_string(~S"""
@@ -485,7 +487,8 @@ defmodule Kernel.WarningTest do
                defp b(arg1, arg2, arg3), do: [arg1, arg2, arg3]
              end
              """)
-           end) =~ "the first 2 default arguments in b/3 are never used\n  nofile:3"
+           end) =~
+             "the default values for the first 2 optional arguments in b/3 are never used\n  nofile:3"
   after
     purge([Sample1, Sample2, Sample3, Sample4, Sample5, Sample6])
   end
@@ -1185,7 +1188,7 @@ defmodule Kernel.WarningTest do
                defmacro __using__(_) do
                  quote do
                    @doc "hello"
-                   def add(a, b), do: a + b
+                   def add(a, 1), do: a + 1
                  end
                end
              end
@@ -1193,7 +1196,7 @@ defmodule Kernel.WarningTest do
              defmodule Sample2 do
                use Sample1
                @doc "world"
-               def add(a, b)
+               def add(a, 2), do: a + 2
              end
              """)
            end) == ""
@@ -1204,12 +1207,23 @@ defmodule Kernel.WarningTest do
                @doc "hello"
                def add(a, 1), do: a + 1
                @doc "world"
+               def add(a, b)
+             end
+             """)
+           end) =~ ""
+
+    assert capture_err(fn ->
+             Code.eval_string("""
+             defmodule Sample4 do
+               @doc "hello"
+               def add(a, 1), do: a + 1
+               @doc "world"
                def add(a, 2), do: a + 2
              end
              """)
            end) =~ "redefining @doc attribute previously set at line "
   after
-    purge([Sample1, Sample2, Sample3])
+    purge([Sample1, Sample2, Sample3, Sample4])
   end
 
   test "reserved doc metadata keys" do

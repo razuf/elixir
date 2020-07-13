@@ -502,7 +502,7 @@ defmodule Kernel.CLI do
             else
               [
                 each_long_compilation:
-                  &IO.puts("Compiling #{Path.relative_to_cwd(&1)} (it's taking more than 15s)")
+                  &IO.puts("Compiling #{Path.relative_to_cwd(&1)} (it's taking more than 10s)")
               ]
             end
 
@@ -528,6 +528,7 @@ defmodule Kernel.CLI do
 
   defp filter_patterns(pattern) do
     pattern
+    |> Path.expand()
     |> Path.wildcard()
     |> :lists.usort()
     |> Enum.filter(&File.regular?/1)

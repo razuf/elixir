@@ -52,7 +52,7 @@ defmodule Logger do
     * `:critical` - for critical conditions
     * `:error` - for errors
     * `:warning` - for warnings
-    * `:notice` - for normal, but signifant, messages
+    * `:notice` - for normal, but significant, messages
     * `:info` - for information of any kind
     * `:debug` - for debug-related messages
 
@@ -109,7 +109,7 @@ defmodule Logger do
 
       Logger.error("We have a problem", [error_code: :pc_load_letter])
 
-  In your app's logger configuration, you would need to whitelist the
+  In your app's logger configuration, you would need to include the
   `:error_code` key and you would need to include `$metadata` as part of
   your log format template:
 
@@ -196,7 +196,7 @@ defmodule Logger do
       may have its specific level, too. In addition to levels mentioned
       above it also support 2 "meta-levels":
 
-        - `:all` - all messages will be logged, conceptualy identical to
+        - `:all` - all messages will be logged, conceptually identical to
           `:debug`
         - `:none` - no messages will be logged at all
 
@@ -653,7 +653,7 @@ defmodule Logger do
 
   ## Examples
 
-      iex> Logger.compare_levels(:debug, :warn)
+      iex> Logger.compare_levels(:debug, :warning)
       :lt
       iex> Logger.compare_levels(:error, :info)
       :gt
@@ -730,6 +730,7 @@ defmodule Logger do
       # This will print the message even if global level is :error
 
   """
+  @doc since: "1.11.0"
   @spec put_module_level(module(), level() | :all | :none) :: :ok | {:error, term()}
   defdelegate put_module_level(mod, level), to: :logger, as: :set_module_level
 
@@ -740,18 +741,21 @@ defmodule Logger do
   was set for given module then it will not be present in
   the returned list.
   """
+  @doc since: "1.11.0"
   @spec get_module_level(module() | [module()]) :: [{module(), level() | :all | :none}]
   defdelegate get_module_level(mod), to: :logger
 
   @doc """
   Deletes logging level for given module to primary level.
   """
+  @doc since: "1.11.0"
   @spec delete_module_level(module() | [module()]) :: :ok
   defdelegate delete_module_level(module), to: :logger, as: :unset_module_level
 
   @doc """
   Deletes logging level for all modules to primary level
   """
+  @doc since: "1.11.0"
   @spec delete_all_module_levels() :: :ok
   defdelegate delete_all_module_levels(), to: :logger, as: :unset_module_level
 
@@ -866,7 +870,7 @@ defmodule Logger do
   end
 
   @doc false
-  def __should_log__(level, module) when level in @levels do
+  def __should_log__(level, module) do
     level = Logger.Handler.elixir_level_to_erlang_level(level)
 
     if enabled?(self()) and :logger.allow(level, module) do
@@ -887,18 +891,17 @@ defmodule Logger do
     end
   end
 
-  def __do_log__(level, msg, metadata)
-      when is_msg(msg) and is_map(metadata) do
-    :logger.macro_log(%{}, level, msg, add_elixir_domain(metadata))
-  end
+  def __do_log__(level, msg, metadata) when level in @levels and is_map(metadata) do
+    if is_msg(msg) do
+      :logger.macro_log(%{}, level, msg, add_elixir_domain(metadata))
+    else
+      # TODO: Remove this branch in Elixir v2.0
+      IO.warn(
+        "passing #{inspect(msg)} to Logger is deprecated, expected a map, a keyword list, a binary, or an iolist"
+      )
 
-  # TODO: Remove that in Elixir v2.0
-  def __do_log__(level, other, metadata) do
-    IO.warn(
-      "passing #{inspect(other)} to Logger is deprecated, expected a map, a keyword list, a binary, or an iolist"
-    )
-
-    :logger.macro_log(%{}, level, to_string(other), add_elixir_domain(metadata))
+      :logger.macro_log(%{}, level, to_string(msg), add_elixir_domain(metadata))
+    end
   end
 
   defp add_elixir_domain(%{domain: domain} = metadata) when is_list(domain) do
@@ -915,7 +918,7 @@ defmodule Logger do
     # Spies like us
     {"Doctor? Doctor", spies: 2, doctors: 0},
     # 2001: Space Odyssey
-    {"I'm sory Dave", emotion: :sorry, receiver: Dave, computer: :mad, model: HAL9000},
+    {"I'm sorry Dave", emotion: :sorry, receiver: Dave, computer: :mad, model: HAL9000},
     # Lost in Space
     {"Danger, Will Robinson", status: :danger, receiver: {Will, Robinson}},
     # The Graduate
@@ -948,6 +951,7 @@ defmodule Logger do
         Logger.#{level}(#{inspect(Map.new(report))})
 
     """
+    @doc since: "1.11.0"
     defmacro unquote(level)(message_or_fun, metadata \\ []) do
       maybe_log(unquote(level), message_or_fun, metadata, __CALLER__)
     end

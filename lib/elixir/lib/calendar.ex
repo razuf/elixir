@@ -68,10 +68,18 @@ defmodule Calendar do
   @typedoc "The time zone abbreviation (for example, CET or CEST or BST, and such)"
   @type zone_abbr :: String.t()
 
-  @typedoc "The time zone UTC offset in seconds"
+  @typedoc """
+  The time zone UTC offset in seconds for standard time.
+
+  See also `t:std_offset/0`.
+  """
   @type utc_offset :: integer
 
-  @typedoc "The time zone standard offset in seconds (not zero in summer times)"
+  @typedoc """
+  The time zone standard offset in seconds (typically not zero in summer times).
+
+  It must be added to `t:utc_offset/0` to get the total offset from UTC used for "wall time".
+  """
   @type std_offset :: integer
 
   @typedoc "Any map/struct that contains the date fields"
@@ -159,8 +167,14 @@ defmodule Calendar do
 
   @doc """
   Calculates the day of the week from the given `year`, `month`, and `day`.
+
+  The `starting_on` represents the starting day of the week. All
+  calendars must support at least the `:default` value. They may
+  also support other values representing their days of the week.
   """
-  @callback day_of_week(year, month, day) :: day_of_week()
+  @callback day_of_week(year, month, day, starting_on :: :default | atom) ::
+              {day_of_week(), first_day_of_week :: non_neg_integer(),
+               last_day_of_week :: non_neg_integer()}
 
   @doc """
   Calculates the day of the year from the given `year`, `month`, and `day`.
@@ -395,19 +409,19 @@ defmodule Calendar do
 
     *  `:month_names` - a function that receives a number and returns the name of
       the corresponding month, if the option is not received it defaults to a
-      function thet returns the month names in english
+      function that returns the month names in English
 
     * `:abbreviated_month_names` - a function that receives a number and returns the
       abbreviated name of the corresponding month, if the option is not received it
-      defaults to a function thet returns the abbreviated month names in english
+      defaults to a function that returns the abbreviated month names in English
 
     * `:day_of_week_names` - a function that receives a number and returns the name of
       the corresponding day of week, if the option is not received it defaults to a
-      function that returns the day of week names in english
+      function that returns the day of week names in English
 
     * `:abbreviated_day_of_week_names` - a function that receives a number and returns
       the abbreviated name of the corresponding day of week, if the option is not received
-      it defaults to a function that returns the abbreviated day of week names in english
+      it defaults to a function that returns the abbreviated day of week names in English
 
   ## Formatting syntax
 
@@ -420,7 +434,7 @@ defmodule Calendar do
     * `%`: indicates the start of a formatted section
     * `<padding>`: set the padding (see below)
     * `<width>`: a number indicating the minimum size of the formatted section
-    * `<format>`: the format iself (see below)
+    * `<format>`: the format itself (see below)
 
   ### Accepted padding options
 
@@ -536,16 +550,12 @@ defmodule Calendar do
   end
 
   defp parse_modifiers(<<digit, rest::binary>>, width, pad, parser_data) when digit in ?0..?9 do
-    new_width =
-      case pad do
-        ?- -> 0
-        _ -> (width || 0) * 10 + (digit - ?0)
-      end
+    new_width = (width || 0) * 10 + (digit - ?0)
 
     parse_modifiers(rest, new_width, pad, parser_data)
   end
 
-  # set default padding if none was specfied
+  # set default padding if none was specified
   defp parse_modifiers(<<format, _::binary>> = rest, width, nil, parser_data) do
     parse_modifiers(rest, width, default_pad(format), parser_data)
   end

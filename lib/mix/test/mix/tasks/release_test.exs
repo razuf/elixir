@@ -9,10 +9,11 @@ defmodule Mix.Tasks.ReleaseTest do
   defmacrop release_node(name), do: :"#{name}@#{@hostname}"
 
   describe "customize" do
-    test "env and vm.args with EEx" do
+    test "env, vm.args and overlays templates" do
       in_fixture("release_test", fn ->
         Mix.Project.in_project(:release_test, ".", fn _ ->
-          File.mkdir_p!("rel")
+          File.mkdir_p!("rel/overlays/empty/directory")
+          File.write!("rel/overlays/hello", "world")
 
           for file <- ~w(rel/vm.args.eex rel/env.sh.eex rel/env.bat.eex) do
             File.write!(file, """
@@ -32,6 +33,68 @@ defmodule Mix.Tasks.ReleaseTest do
 
           assert root |> Path.join("releases/0.1.0/vm.args") |> File.read!() ==
                    "rel/vm.args.eex FOR release_test\n"
+
+          assert root |> Path.join("empty/directory") |> File.dir?()
+          assert root |> Path.join("hello") |> File.read!() == "world"
+        end)
+      end)
+    end
+
+    test "env, vm.args and overlays templates with custom rel_templates_path" do
+      in_fixture("release_test", fn ->
+        config = [
+          releases: [
+            release_test: [rel_templates_path: "custom_rel"]
+          ]
+        ]
+
+        Mix.Project.in_project(:release_test, ".", config, fn _ ->
+          File.mkdir_p!("custom_rel/overlays/empty/directory")
+          File.write!("custom_rel/overlays/hello", "world")
+
+          for file <- ~w(custom_rel/vm.args.eex custom_rel/env.sh.eex custom_rel/env.bat.eex) do
+            File.write!(file, """
+            #{file} FOR <%= @release.name %>
+            """)
+          end
+
+          root = Path.absname("_build/dev/rel/release_test")
+          Mix.Task.run("release")
+          assert_received {:mix_shell, :info, ["* assembling release_test-0.1.0 on MIX_ENV=dev"]}
+
+          assert root |> Path.join("releases/0.1.0/env.sh") |> File.read!() ==
+                   "custom_rel/env.sh.eex FOR release_test\n"
+
+          assert root |> Path.join("releases/0.1.0/env.bat") |> File.read!() ==
+                   "custom_rel/env.bat.eex FOR release_test\n"
+
+          assert root |> Path.join("releases/0.1.0/vm.args") |> File.read!() ==
+                   "custom_rel/vm.args.eex FOR release_test\n"
+
+          assert root |> Path.join("empty/directory") |> File.dir?()
+          assert root |> Path.join("hello") |> File.read!() == "world"
+        end)
+      end)
+    end
+
+    test "custom overlays" do
+      in_fixture("release_test", fn ->
+        config = [releases: [release_test: [overlays: "rel/another"]]]
+
+        Mix.Project.in_project(:release_test, ".", config, fn _ ->
+          File.mkdir_p!("rel/overlays")
+          File.write!("rel/overlays/hello", "world")
+          File.write!("rel/overlays/original", "kept")
+
+          File.mkdir_p!("rel/another/empty/directory")
+          File.write!("rel/another/hello", "override")
+
+          root = Path.absname("_build/dev/rel/release_test")
+          Mix.Task.rerun("release", ["--overwrite"])
+
+          assert root |> Path.join("empty/directory") |> File.dir?()
+          assert root |> Path.join("hello") |> File.read!() == "override"
+          assert root |> Path.join("original") |> File.read!() == "kept"
         end)
       end)
     end
@@ -66,14 +129,27 @@ defmodule Mix.Tasks.ReleaseTest do
       end)
     end
 
-    test "include_executables_for" do
+    test "include_executables_for and strip_beams" do
       in_fixture("release_test", fn ->
-        config = [releases: [release_test: [include_executables_for: []]]]
+        config = [
+          releases: [
+            release_test: [
+              include_executables_for: [],
+              strip_beams: [keep: "Docs"]
+            ]
+          ]
+        ]
 
         Mix.Project.in_project(:release_test, ".", config, fn _ ->
           root = Path.absname("_build/dev/rel/release_test")
           Mix.Task.run("release")
           assert_received {:mix_shell, :info, ["* assembling release_test-0.1.0 on MIX_ENV=dev"]}
+
+          beam =
+            File.read!(Path.join(root, "lib/release_test-0.1.0/ebin/Elixir.ReleaseTest.beam"))
+
+          assert {:ok, {_, [{'Docs', _}]}} = :beam_lib.chunks(beam, ['Docs'])
+          assert {:error, _, _} = :beam_lib.chunks(beam, ['Dbgi'])
 
           refute root |> Path.join("bin/start") |> File.exists?()
           refute root |> Path.join("bin/start.bat") |> File.exists?()
@@ -81,42 +157,6 @@ defmodule Mix.Tasks.ReleaseTest do
           refute root |> Path.join("releases/0.1.0/elixir.bat") |> File.exists?()
           refute root |> Path.join("releases/0.1.0/iex") |> File.exists?()
           refute root |> Path.join("releases/0.1.0/iex.bat") |> File.exists?()
-        end)
-      end)
-    end
-
-    test "default overlays" do
-      in_fixture("release_test", fn ->
-        Mix.Project.in_project(:release_test, ".", fn _ ->
-          File.mkdir_p!("rel/overlays/empty/directory")
-          File.write!("rel/overlays/hello", "world")
-
-          root = Path.absname("_build/dev/rel/release_test")
-          Mix.Task.run("release")
-
-          assert root |> Path.join("empty/directory") |> File.dir?()
-          assert root |> Path.join("hello") |> File.read!() == "world"
-        end)
-      end)
-    end
-
-    test "custom overlays" do
-      in_fixture("release_test", fn ->
-        config = [releases: [release_test: [overlays: "rel/another"]]]
-
-        Mix.Project.in_project(:release_test, ".", config, fn _ ->
-          assert_raise Mix.Error, ~r"a string pointing to an existing directory", fn ->
-            Mix.Task.run("release", ["--overwrite"])
-          end
-
-          File.mkdir_p!("rel/another/empty/directory")
-          File.write!("rel/another/hello", "world")
-
-          root = Path.absname("_build/dev/rel/release_test")
-          Mix.Task.rerun("release", ["--overwrite"])
-
-          assert root |> Path.join("empty/directory") |> File.dir?()
-          assert root |> Path.join("hello") |> File.read!() == "world"
         end)
       end)
     end
@@ -135,7 +175,7 @@ defmodule Mix.Tasks.ReleaseTest do
   end
 
   describe "tar" do
-    test "with ERTS" do
+    test "with default options" do
       in_fixture("release_test", fn ->
         config = [releases: [demo: [steps: [:assemble, :tar]]]]
 
@@ -186,15 +226,15 @@ defmodule Mix.Tasks.ReleaseTest do
       end)
     end
 
-    test "without ERTS" do
+    test "without ERTS and custom path" do
       in_fixture("release_test", fn ->
-        config = [releases: [demo: [include_erts: false, steps: [:assemble, :tar]]]]
+        config = [
+          releases: [demo: [include_erts: false, path: "tmp/rel", steps: [:assemble, :tar]]]
+        ]
 
         Mix.Project.in_project(:release_test, ".", config, fn _ ->
-          root = Path.absname("_build/#{Mix.env()}/rel/demo")
-
           Mix.Task.run("release")
-          tar_path = Path.expand(Path.join([root, "..", "..", "demo-0.1.0.tar.gz"]))
+          tar_path = Path.expand(Path.join(["tmp", "rel", "demo-0.1.0.tar.gz"]))
           message = "* building #{tar_path}"
           assert_received {:mix_shell, :info, [^message]}
           assert File.exists?(tar_path)
@@ -281,7 +321,7 @@ defmodule Mix.Tasks.ReleaseTest do
         assert %{
                  app_dir: app_dir,
                  cookie_env: ^cookie,
-                 encoding: {:"£", "£", '£'},
+                 encoding: {:time_μs, :"£", "£", '£'},
                  mode: :embedded,
                  node: release_node("release_test"),
                  protocols_consolidated?: true,
@@ -319,10 +359,15 @@ defmodule Mix.Tasks.ReleaseTest do
       config = [releases: [runtime_config: []]]
 
       Mix.Project.in_project(:release_test, ".", config, fn _ ->
-        File.write!("config/releases.exs", """
+        File.write!("config/runtime.exs", """
         import Config
-        config :release_test, :runtime, :was_set
-        config :release_test, :encoding, {:runtime, :"£", "£", '£'}
+
+        if System.get_env("RELEASE_MODE") == nil do
+          raise "file should not be loaded while assembling release"
+        end
+
+        config :release_test, :runtime, {:was_set, config_env(), config_target()}
+        config :release_test, :encoding, {:runtime, :time_μs, :"£", "£", '£'}
         """)
 
         root = Path.absname("_build/dev/rel/runtime_config")
@@ -332,7 +377,7 @@ defmodule Mix.Tasks.ReleaseTest do
         assert_received {:mix_shell, :info, ["* assembling runtime_config-0.1.0 on MIX_ENV=dev"]}
 
         assert_received {:mix_shell, :info,
-                         ["* using config/releases.exs to configure the release at runtime"]}
+                         ["* using config/runtime.exs to configure the release at runtime"]}
 
         # Assert structure
         assert root
@@ -348,14 +393,15 @@ defmodule Mix.Tasks.ReleaseTest do
         open_port(Path.join(root, "bin/runtime_config"), ['start'])
 
         assert %{
-                 encoding: {:runtime, :"£", "£", '£'},
+                 encoding: {:runtime, :time_μs, :"£", "£", '£'},
                  mode: :embedded,
                  node: release_node("runtime_config"),
                  protocols_consolidated?: true,
                  release_name: "runtime_config",
+                 release_mode: "embedded",
                  release_node: "runtime_config",
                  release_vsn: "0.1.0",
-                 runtime_config: {:ok, :was_set},
+                 runtime_config: {:ok, {:was_set, :dev, :host}},
                  static_config: {:ok, :was_set},
                  sys_config_env: sys_config_env,
                  sys_config_init: sys_config_init
@@ -458,7 +504,7 @@ defmodule Mix.Tasks.ReleaseTest do
       File.mkdir_p!("different_config")
       File.cp!("config/config.exs", "different_config/config.exs")
 
-      File.write!("different_config/releases.exs", """
+      File.write!("different_config/runtime.exs", """
       import Config
       config :release_test, :static, String.to_atom(System.get_env("RELEASE_STATIC"))
       """)
@@ -497,7 +543,7 @@ defmodule Mix.Tasks.ReleaseTest do
       Mix.Project.in_project(:release_test, ".", config, fn _ ->
         Mix.Task.run("loadconfig", [])
 
-        File.write!("config/releases.exs", """
+        File.write!("config/runtime.exs", """
         import Config
         config :release_test, :static, String.to_atom(System.get_env("RELEASE_STATIC"))
         """)
@@ -526,8 +572,8 @@ defmodule Mix.Tasks.ReleaseTest do
       Mix.Project.in_project(:release_test, ".", config, fn _ ->
         Mix.Task.run("loadconfig", [])
 
-        # For compile env to be validated, we need a config/releases.exs
-        File.write!("config/releases.exs", """
+        # For compile env to be validated, we need a config/runtime.exs
+        File.write!("config/runtime.exs", """
         import Config
         """)
 
@@ -556,7 +602,7 @@ defmodule Mix.Tasks.ReleaseTest do
       config = [releases: [eval: [include_erts: false, cookie: "abcdefghij"]]]
 
       Mix.Project.in_project(:release_test, ".", config, fn _ ->
-        File.write!("config/releases.exs", """
+        File.write!("config/runtime.exs", """
         import Config
         config :release_test, :runtime, :was_set
         """)

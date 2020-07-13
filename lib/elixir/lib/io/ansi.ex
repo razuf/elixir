@@ -22,6 +22,15 @@ defmodule IO.ANSI do
   are characters embedded in text used to control formatting, color, and
   other output options on video text terminals.
 
+  ANSI escapes are typically enabled on all Unix terminals. They are also
+  available on Windows consoles from Windows 10, although it must be
+  explicitly enabled for the current user in the registry by running the
+  following command:
+
+      reg add HKCU\\Console /v VirtualTerminalLevel /t REG_DWORD /d 1
+
+  After running the command above, you must restart your current console.
+
   ## Examples
 
   Because the ANSI escape sequences are embedded in text, the normal usage of
@@ -31,7 +40,7 @@ defmodule IO.ANSI do
       IO.puts(formatted_text)
 
   A higher level and more convenient API is also available via `IO.ANSI.format/1`,
-  where you use atoms to represent each ANSI escape sequence and by default 
+  where you use atoms to represent each ANSI escape sequence and by default
   checks if ANSI is enabled:
 
       IO.puts(IO.ANSI.format([:blue_background, "Example"]))

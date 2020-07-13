@@ -1363,10 +1363,16 @@ defmodule Kernel do
   Removes the first occurrence of an element on the left list
   for each element on the right.
 
-  The complexity of `a -- b` is proportional to `length(a) * length(b)`,
-  meaning that it will be very slow if both `a` and `b` are long lists.
-  In such cases, consider converting each list to a `MapSet` and using
-  `MapSet.difference/2`.
+  Before Erlang/OTP 22, the complexity of `a -- b` was proportional to
+  `length(a) * length(b)`, meaning that it would be very slow if
+  both `a` and `b` were long lists. In such cases, consider
+  converting each list to a `MapSet` and using `MapSet.difference/2`.
+
+  As of Erlang/OTP 22, this operation is significantly faster even if both
+  lists are very long, and using `--/2` is usually faster and uses less
+  memory than using the `MapSet`-based alternative mentioned above.
+  See also the [Erlang efficiency
+  guide](https://erlang.org/doc/efficiency_guide/retired_myths.html).
 
   Inlined by the compiler.
 
@@ -2295,6 +2301,90 @@ defmodule Kernel do
   end
 
   @doc """
+  Returns true if `term` is an exception; otherwise returns `false`.
+
+  Allowed in guard tests.
+
+  ## Examples
+
+      iex> is_exception(%RuntimeError{})
+      true
+
+      iex> is_exception(%{})
+      false
+
+  """
+  @doc since: "1.11.0", guard: true
+  defmacro is_exception(term) do
+    case __CALLER__.context do
+      nil ->
+        quote do
+          case unquote(term) do
+            %_{__exception__: true} -> true
+            _ -> false
+          end
+        end
+
+      :match ->
+        invalid_match!(:is_exception)
+
+      :guard ->
+        quote do
+          is_map(unquote(term)) and :erlang.is_map_key(:__struct__, unquote(term)) and
+            is_atom(:erlang.map_get(:__struct__, unquote(term))) and
+            :erlang.is_map_key(:__exception__, unquote(term)) and
+            :erlang.map_get(:__exception__, unquote(term)) == true
+        end
+    end
+  end
+
+  @doc """
+  Returns true if `term` is an exception of `name`; otherwise returns `false`.
+
+  Allowed in guard tests.
+
+  ## Examples
+
+      iex> is_exception(%RuntimeError{}, RuntimeError)
+      true
+
+      iex> is_exception(%RuntimeError{}, Macro.Env)
+      false
+
+  """
+  @doc since: "1.11.0", guard: true
+  defmacro is_exception(term, name) do
+    case __CALLER__.context do
+      nil ->
+        quote do
+          case unquote(name) do
+            name when is_atom(name) ->
+              case unquote(term) do
+                %{__struct__: ^name, __exception__: true} -> true
+                _ -> false
+              end
+
+            _ ->
+              raise ArgumentError
+          end
+        end
+
+      :match ->
+        invalid_match!(:is_exception)
+
+      :guard ->
+        quote do
+          is_map(unquote(term)) and
+            (is_atom(unquote(name)) or :fail) and
+            :erlang.is_map_key(:__struct__, unquote(term)) and
+            :erlang.map_get(:__struct__, unquote(term)) == unquote(name) and
+            :erlang.is_map_key(:__exception__, unquote(term)) and
+            :erlang.map_get(:__exception__, unquote(term)) == true
+        end
+    end
+  end
+
+  @doc """
   Gets a value from a nested structure.
 
   Uses the `Access` module to traverse the structures
@@ -2380,6 +2470,12 @@ defmodule Kernel do
   according to the given `keys`, unless the `key` is a
   function. If the key is a function, it will be invoked
   as specified in `get_and_update_in/3`.
+
+  `data` is a nested structure (that is, a map, keyword
+  list, or struct that implements the `Access` behaviour).
+  The `fun` argument receives the value of `key` (or `nil`
+  if `key` is not present) and the result replaces the value
+  in the structure.
 
   ## Examples
 
@@ -3616,7 +3712,7 @@ defmodule Kernel do
   """
   @doc guard: true
   defmacro left in right do
-    in_module? = __CALLER__.context == nil
+    in_body? = __CALLER__.context == nil
 
     expand =
       case bootstrapped?(Macro) do
@@ -3625,7 +3721,7 @@ defmodule Kernel do
       end
 
     case expand.(right) do
-      [] when not in_module? ->
+      [] when not in_body? ->
         false
 
       [] ->
@@ -3634,28 +3730,28 @@ defmodule Kernel do
           false
         end
 
-      [head | tail] = list when not in_module? ->
-        in_var(in_module?, left, &in_list(&1, head, tail, expand, list, in_module?))
+      [head | tail] = list when not in_body? ->
+        in_list(left, head, tail, expand, list, in_body?)
 
-      [_ | _] = list when in_module? ->
+      [_ | _] = list when in_body? ->
         case ensure_evaled(list, {0, []}, expand) do
           {[head | tail], {_, []}} ->
-            in_var(in_module?, left, &in_list(&1, head, tail, expand, list, in_module?))
+            in_var(in_body?, left, &in_list(&1, head, tail, expand, list, in_body?))
 
           {[head | tail], {_, vars_values}} ->
             {vars, values} = :lists.unzip(:lists.reverse(vars_values))
-            is_in_list = &in_list(&1, head, tail, expand, list, in_module?)
+            is_in_list = &in_list(&1, head, tail, expand, list, in_body?)
 
             quote do
               {unquote_splicing(vars)} = {unquote_splicing(values)}
-              unquote(in_var(in_module?, left, is_in_list))
+              unquote(in_var(in_body?, left, is_in_list))
             end
         end
 
       {:%{}, _meta, [__struct__: Elixir.Range, first: first, last: last]} ->
-        in_var(in_module?, left, &in_range(&1, expand.(first), expand.(last)))
+        in_var(in_body?, left, &in_range(&1, expand.(first), expand.(last)))
 
-      right when in_module? ->
+      right when in_body? ->
         quote(do: Elixir.Enum.member?(unquote(right), unquote(left)))
 
       %{__struct__: Elixir.Range, first: _, last: _} ->
@@ -3764,18 +3860,12 @@ defmodule Kernel do
     end
   end
 
-  defp in_list(left, head, tail, expand, right, in_module?) do
-    [head | tail] =
-      :lists.foldl(
-        &[comp(left, &1, expand, right, in_module?) | &2],
-        [],
-        [head | tail]
-      )
-
-    :lists.foldl(&quote(do: :erlang.orelse(unquote(&1), unquote(&2))), head, tail)
+  defp in_list(left, head, tail, expand, right, in_body?) do
+    [head | tail] = :lists.map(&comp(left, &1, expand, right, in_body?), [head | tail])
+    :lists.foldl(&quote(do: :erlang.orelse(unquote(&2), unquote(&1))), head, tail)
   end
 
-  defp comp(left, {:|, _, [head, tail]}, expand, right, in_module?) do
+  defp comp(left, {:|, _, [head, tail]}, expand, right, in_body?) do
     case expand.(tail) do
       [] ->
         quote(do: :erlang."=:="(unquote(left), unquote(head)))
@@ -3784,11 +3874,11 @@ defmodule Kernel do
         quote do
           :erlang.orelse(
             :erlang."=:="(unquote(left), unquote(head)),
-            unquote(in_list(left, tail_head, tail, expand, right, in_module?))
+            unquote(in_list(left, tail_head, tail, expand, right, in_body?))
           )
         end
 
-      tail when in_module? ->
+      tail when in_body? ->
         quote do
           :erlang.orelse(
             :erlang."=:="(unquote(left), unquote(head)),
@@ -3801,7 +3891,7 @@ defmodule Kernel do
     end
   end
 
-  defp comp(left, right, _expand, _right, _in_module?) do
+  defp comp(left, right, _expand, _right, _in_body?) do
     quote(do: :erlang."=:="(unquote(left), unquote(right)))
   end
 
@@ -4925,6 +5015,18 @@ defmodule Kernel do
   defmacro defdelegate(funs, opts) do
     funs = Macro.escape(funs, unquote: true)
 
+    # don't add compile-time dependency on :to
+    opts =
+      with true <- is_list(opts),
+           {:ok, target} <- Keyword.fetch(opts, :to),
+           {:__aliases__, _, _} <- target do
+        target = Macro.expand(target, %{__CALLER__ | function: {:__info__, 1}})
+        Keyword.replace!(opts, :to, target)
+      else
+        _ ->
+          opts
+      end
+
     quote bind_quoted: [funs: funs, opts: opts] do
       target =
         Keyword.get(opts, :to) || raise ArgumentError, "expected to: to be given as argument"
@@ -5524,9 +5626,12 @@ defmodule Kernel do
   end
 
   @doc false
-  # TODO: Remove on v2.0 (also hard-coded in elixir_dispatch)
-  @deprecated "Use Kernel.to_charlist/1 instead"
   defmacro to_char_list(arg) do
+    IO.warn(
+      "Kernel.to_char_list/1 is deprecated, use Kernel.to_charlist/1 instead",
+      Macro.Env.stacktrace(__CALLER__)
+    )
+
     quote(do: Kernel.to_charlist(unquote(arg)))
   end
 end

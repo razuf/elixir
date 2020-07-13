@@ -57,9 +57,11 @@ defmodule Mix.Tasks.Release do
       the VM will find the `Enum` module and load it. There’s a downside.
       When you start a new server in production, it may need to load
       many other modules, causing the first requests to have an unusual
-      spike in response time. Releases run in embedded mode, which loads
-      all available modules upfront, guaranteeing your system is ready
-      to handle requests after booting.
+      spike in response time. When running in Erlang/OTP earlier than 23,
+      the system always runs in embedded mode. When using Erlang/OTP 23+,
+      they run in interactive mode while being configured and then it
+      swaps to embedded mode, guaranteeing your system is ready to handle
+      requests after booting.
 
     * Configuration and customization. Releases give developers fine
       grained control over system configuration and the VM flags used
@@ -388,9 +390,10 @@ defmodule Mix.Tasks.Release do
       Releases assembled from an umbrella project require this configuration
       to be explicitly given.
 
-    * `:strip_beams` - a boolean that controls if BEAM files should have their debug
-      information, documentation chunks, and other non-essential metadata removed.
-      Defaults to `true`.
+    * `:strip_beams` - controls if BEAM files should have their debug information,
+      documentation chunks, and other non-essential metadata removed. Defaults to
+      `true`. Maybe be set to `false` to disable striping. Also accepts
+      `[keep: ["Docs", "Dbgi"]]` to keep certain chunks that are usually stripped.
 
     * `:cookie` - a string representing the Erlang Distribution cookie. If this
       option is not set, a random cookie is  written to the `releases/COOKIE` file
@@ -445,9 +448,14 @@ defmodule Mix.Tasks.Release do
             ]
           ]
 
-    * `:overlays` - a directory with extra files to be copied as is to the
-      release. See the "Overlays" section for more information. Defaults to
-      "rel/overlays" if said directory exists.
+    * `:rel_templates_path` - the path to find template files that are copied to
+      the release, such as "vm.args.eex", "env.sh.eex" (or "env.bat.eex"), and
+      "overlays". Defaults to "rel" in the project root.
+
+    * `:overlays` - a list of directories with extra files to be copied
+      as is to the release. The "overlays" directory at `:rel_templates_path`
+      is always included in this list by default (typically at "rel/overlays").
+      See the "Overlays" section for more information.
 
     * `:steps` - a list of steps to execute when assembling the release. See
       the "Steps" section for more information.
@@ -472,8 +480,11 @@ defmodule Mix.Tasks.Release do
   files in the `rel/overlays` directory. Any file in there is copied
   as is to the release root. For example, if you have placed a
   "rel/overlays/Dockerfile" file, the "Dockerfile" will be copied as
-  is to the release root. If you need to copy files dynamically, see
-  the "Steps" section.
+  is to the release root.
+
+  If you want to specify extra overlay directories, you can do so
+  with the `:overlays` option. If you need to copy files dynamically,
+  see the "Steps" section.
 
   ### Steps
 
@@ -493,7 +504,9 @@ defmodule Mix.Tasks.Release do
   will receive a `Mix.Release` struct and must return the same or
   an updated `Mix.Release` struct. It is also possible to build a tarball
   of the release by passing the `:tar` step anywhere after `:assemble`.
-  The tarball is created in `_build/MIX_ENV/RELEASE_NAME-RELEASE_VSN.tar.gz`
+  If the release `:path` is not configured, the tarball is created in
+  `_build/MIX_ENV/RELEASE_NAME-RELEASE_VSN.tar.gz` Otherwise it is
+  created inside the configured `:path`.
 
   See `Mix.Release` for more documentation on the struct and which
   fields can be modified. Note that the `:steps` field itself can be
@@ -585,19 +598,22 @@ defmodule Mix.Tasks.Release do
   ### Runtime configuration
 
   To enable runtime configuration in your release, all you need to do is
-  to create a file named `config/releases.exs`:
+  to create a file named `config/runtime.exs`:
 
       import Config
       config :my_app, :secret_key, System.fetch_env!("MY_APP_SECRET_KEY")
 
-  Your `config/releases.exs` file needs to follow three important rules:
+  This file will be executed whenever your Mix project or your release
+  starts.
+
+  Your `config/runtime.exs` file needs to follow three important rules:
 
     * It MUST `import Config` at the top instead of the deprecated `use Mix.Config`
     * It MUST NOT import any other configuration file via `import_config`
-    * It MUST NOT access `Mix` in any way, as `Mix` is a build tool and it not
-      available inside releases
+    * It MUST NOT access `Mix` in any way, as `Mix` is a build tool and
+      it is not available inside releases
 
-  If a `config/releases.exs` exists, it will be copied to your release
+  If a `config/runtime.exs` exists, it will be copied to your release
   and executed early in the boot process, when only Elixir and Erlang's
   main applications have been started. Once the configuration is loaded,
   the Erlang system will be restarted (within the same Operating System
@@ -668,9 +684,11 @@ defmodule Mix.Tasks.Release do
       application configuration, which are executed when the release is
       assembled
 
-    * `config/releases.exs` - provides runtime application configuration.
-      It is executed every time the release boots and is further extensible
-      via config providers
+    * `config/runtime.exs` - provides runtime application configuration.
+      It is executed every time your Mix project or your release boots
+      and is further extensible via config providers. If you want to
+      detect you are inside a release, you can check for release specific
+      environment variables, such as `RELEASE_NODE` or `RELEASE_MODE`
 
     * `rel/vm.args.eex` - a template file that is copied into every release
       and provides static configuration of the Erlang Virtual Machine and
@@ -701,7 +719,7 @@ defmodule Mix.Tasks.Release do
           env.sh
           iex
           iex.bat
-          releases.exs
+          runtime.exs
           start.boot
           start.script
           start_clean.boot
@@ -746,6 +764,9 @@ defmodule Mix.Tasks.Release do
     * `RELEASE_NODE` - the release node name, in the format `name@host`.
       It can be set to a custom value. The name part must be made only
       of letters, digits, underscores, and hyphens
+
+    * `RELEASE_SYS_CONFIG` - the location of the sys.config file. It can
+      be set to a custom path and it must not include the `.config` extension
 
     * `RELEASE_VM_ARGS` - the location of the vm.args file. It can be set
       to a custom path
@@ -1081,8 +1102,16 @@ defmodule Mix.Tasks.Release do
   end
 
   defp make_tar(release) do
-    tar_filename = "#{release.name}-#{release.version}.tar.gz"
-    out_path = Path.join([release.path, "..", "..", tar_filename]) |> Path.expand()
+    build_path = Mix.Project.build_path()
+
+    dir_path =
+      if release.path == Path.join([build_path, "rel", Atom.to_string(release.name)]) do
+        build_path
+      else
+        release.path
+      end
+
+    out_path = Path.join(dir_path, "#{release.name}-#{release.version}.tar.gz")
     info(release, [:green, "* building ", :reset, out_path])
 
     lib_dirs =
@@ -1131,7 +1160,7 @@ defmodule Mix.Tasks.Release do
 
     sys_config =
       if File.regular?(config[:config_path]) do
-        config[:config_path] |> Config.Reader.read!()
+        config[:config_path] |> Config.Reader.read!(env: Mix.env(), target: Mix.target())
       else
         []
       end
@@ -1156,16 +1185,20 @@ defmodule Mix.Tasks.Release do
   end
 
   defp maybe_add_config_reader_provider(config, %{options: opts} = release, version_path) do
-    default_path = config[:config_path] |> Path.dirname() |> Path.join("releases.exs")
+    default_path = config[:config_path] |> Path.dirname() |> Path.join("runtime.exs")
+    deprecated_path = config[:config_path] |> Path.dirname() |> Path.join("releases.exs")
 
     path =
       cond do
-        # TODO: rename this to releases_config_path when we introduce runtime_config_path
         path = opts[:runtime_config_path] ->
           path
 
         File.exists?(default_path) ->
           default_path
+
+        File.exists?(deprecated_path) ->
+          # TODO: Warn from Elixir v1.13 onwards
+          deprecated_path
 
         true ->
           nil
@@ -1175,9 +1208,10 @@ defmodule Mix.Tasks.Release do
       path ->
         msg = "#{path} to configure the release at runtime"
         Mix.shell().info([:green, "* using ", :reset, msg])
-        File.cp!(path, Path.join(version_path, "releases.exs"))
-        init = {:system, "RELEASE_ROOT", "/releases/#{release.version}/releases.exs"}
-        update_in(release.config_providers, &[{Config.Reader, init} | &1])
+        File.cp!(path, Path.join(version_path, "runtime.exs"))
+        init = {:system, "RELEASE_ROOT", "/releases/#{release.version}/runtime.exs"}
+        opts = [path: init, env: Mix.env(), target: Mix.target(), imports: :disabled]
+        update_in(release.config_providers, &[{Config.Reader, opts} | &1])
 
       release.config_providers == [] ->
         skipping("runtime configuration (#{default_path} not found)")
@@ -1216,8 +1250,10 @@ defmodule Mix.Tasks.Release do
   end
 
   defp make_vm_args(release, path) do
-    if File.exists?("rel/vm.args.eex") do
-      copy_template("rel/vm.args.eex", path, [release: release], force: true)
+    vm_args_template = Mix.Release.rel_templates_path(release, "vm.args.eex")
+
+    if File.exists?(vm_args_template) do
+      copy_template(vm_args_template, path, [release: release], force: true)
     else
       File.write!(path, vm_args_template(release: release))
     end
@@ -1264,28 +1300,19 @@ defmodule Mix.Tasks.Release do
 
   defp copy_overlays(release) do
     target = release.path
-    overlays = release.options[:overlays]
+    default = Mix.Release.rel_templates_path(release, "overlays")
 
-    copied =
-      cond do
-        is_nil(overlays) and File.dir?("rel/overlays") ->
-          File.cp_r!("rel/overlays", target)
-
-        is_nil(overlays) ->
-          []
-
-        is_binary(overlays) and File.dir?(overlays) ->
-          File.cp_r!(overlays, target)
-
-        true ->
-          Mix.raise(
-            ":overlays release configuration must be a string pointing to an existing directory, " <>
-              "got: #{inspect(overlays)}"
-          )
+    overlays =
+      if File.dir?(default) do
+        [default | List.wrap(release.options[:overlays])]
+      else
+        List.wrap(release.options[:overlays])
       end
 
     relative =
-      copied
+      overlays
+      |> Enum.flat_map(&File.cp_r!(&1, target))
+      |> Enum.uniq()
       |> List.delete(target)
       |> Enum.map(&Path.relative_to(&1, target))
 
@@ -1320,7 +1347,7 @@ defmodule Mix.Tasks.Release do
     for os <- include_executables_for do
       {env, env_fun, clis} = cli_for(os, release)
       env_path = Path.join(release.version_path, env)
-      env_template_path = Path.join("rel", env <> ".eex")
+      env_template_path = Mix.Release.rel_templates_path(release, env <> ".eex")
 
       if File.exists?(env_template_path) do
         copy_template(env_template_path, env_path, [release: release], force: true)
@@ -1388,6 +1415,20 @@ defmodule Mix.Tasks.Release do
   end
 
   defp executable!(path), do: File.chmod!(path, 0o744)
+
+  # Helper functions
+
+  defp release_mode(release, env_var) do
+    # TODO: Remove otp_release check once we require Erlang/OTP 23+
+    otp_gte_23? = :erlang.system_info(:otp_release) >= '23'
+    reboot? = Keyword.get(release.options, :reboot_system_after_config, true)
+
+    if otp_gte_23? and reboot? and release.config_providers != [] do
+      "-elixir -config_provider_reboot_mode #{env_var}"
+    else
+      "-mode #{env_var}"
+    end
+  end
 
   embed_template(:vm_args, Mix.Tasks.Release.Init.vm_args_text())
   embed_template(:env, Mix.Tasks.Release.Init.env_text())

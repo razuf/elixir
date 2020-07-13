@@ -60,7 +60,7 @@ defmodule String do
   Note it is generally not advised to use `\xNN` in Elixir
   strings, as introducing an invalid byte sequence would
   make the string invalid. If you have to introduce a
-  character by its hexdecimal representation, it is best
+  character by its hexadecimal representation, it is best
   to work with Unicode code points, such as `\uNNNN`. In fact,
   understanding Unicode code points can be essential when doing
   low-level manipulations of string, so let's explore them in
@@ -457,13 +457,13 @@ defmodule String do
   For example, take the grapheme "é" which is made of the characters
   "e" and the acute accent. The following will split the string into two parts:
 
-      iex> String.split(:unicode.characters_to_nfd_binary("é"), "e")
+      iex> String.split(String.normalize("é", :nfd), "e")
       ["", "́"]
 
   However, if "é" is represented by the single character "e with acute"
   accent, then it will split the string into just one part:
 
-      iex> String.split(:unicode.characters_to_nfc_binary("é"), "e")
+      iex> String.split(String.normalize("é", :nfc), "e")
       ["é"]
 
   """
@@ -652,9 +652,9 @@ defmodule String do
 
       String.normalize(string1, :nfd) == String.normalize(string2, :nfd)
 
-  Therefore, if you plan to compare multiple strings, multiple times
-  in a row, you may normalize them upfront and compare them directly
-  to avoid multiple normalization passes.
+  If you plan to compare multiple strings, multiple times in a row, you
+  may normalize them upfront and compare them directly to avoid multiple
+  normalization passes.
 
   ## Examples
 
@@ -676,21 +676,83 @@ defmodule String do
     normalize(string1, :nfd) == normalize(string2, :nfd)
   end
 
-  @doc false
-  @deprecated "Use :unicode.characters_to_nfc_binary/1 or :unicode.characters_to_nfd_binary/1 instead"
+  @doc """
+  Converts all characters in `string` to Unicode normalization
+  form identified by `form`.
+
+  Invalid Unicode codepoints are skipped and the remaining of
+  the string is converted. If you want the algorithm to stop
+  and return on invalid codepoint, use `:unicode.characters_to_nfd_binary/1`,
+  `:unicode.characters_to_nfc_binary/1`, `:unicode.characters_to_nfkd_binary/1`,
+  and `:unicode.characters_to_nfkc_binary/1` instead.
+
+  Normalization forms `:nfkc` and `:nfkd` should not be blindly applied
+  to arbitrary text. Because they erase many formatting distinctions,
+  they will prevent round-trip conversion to and from many legacy
+  character sets.
+
+  ## Forms
+
+  The supported forms are:
+
+    * `:nfd` - Normalization Form Canonical Decomposition.
+      Characters are decomposed by canonical equivalence, and
+      multiple combining characters are arranged in a specific
+      order.
+
+    * `:nfc` - Normalization Form Canonical Composition.
+      Characters are decomposed and then recomposed by canonical equivalence.
+
+    * `:nfkd` - Normalization Form Compatibility Decomposition.
+      Characters are decomposed by compatibility equivalence, and
+      multiple combining characters are arranged in a specific
+      order.
+
+    * `:nfkc` - Normalization Form Compatibility Composition.
+      Characters are decomposed and then recomposed by compatibility equivalence.
+
+  ## Examples
+
+      iex> String.normalize("yêṩ", :nfd)
+      "yêṩ"
+
+      iex> String.normalize("leña", :nfc)
+      "leña"
+
+      iex> String.normalize("ﬁ", :nfkd)
+      "fi"
+
+      iex> String.normalize("fi", :nfkc)
+      "fi"
+
+  """
   def normalize(string, form)
 
   def normalize(string, :nfd) do
     case :unicode.characters_to_nfd_binary(string) do
       string when is_binary(string) -> string
-      {:error, bad, rest} -> bad <> normalize(rest, :nfd)
+      {:error, good, <<head, rest::binary>>} -> good <> <<head>> <> normalize(rest, :nfd)
     end
   end
 
   def normalize(string, :nfc) do
     case :unicode.characters_to_nfc_binary(string) do
       string when is_binary(string) -> string
-      {:error, bad, rest} -> bad <> normalize(rest, :nfc)
+      {:error, good, <<head, rest::binary>>} -> good <> <<head>> <> normalize(rest, :nfc)
+    end
+  end
+
+  def normalize(string, :nfkd) do
+    case :unicode.characters_to_nfkd_binary(string) do
+      string when is_binary(string) -> string
+      {:error, good, <<head, rest::binary>>} -> good <> <<head>> <> normalize(rest, :nfkd)
+    end
+  end
+
+  def normalize(string, :nfkc) do
+    case :unicode.characters_to_nfkc_binary(string) do
+      string when is_binary(string) -> string
+      {:error, good, <<head, rest::binary>>} -> good <> <<head>> <> normalize(rest, :nfkc)
     end
   end
 
@@ -2189,13 +2251,13 @@ defmodule String do
   For example, take the grapheme "é" which is made of the characters
   "e" and the acute accent. The following returns `true`:
 
-      iex> String.contains?(:unicode.characters_to_nfd_binary("é"), "e")
+      iex> String.contains?(String.normalize("é", :nfd), "e")
       true
 
   However, if "é" is represented by the single character "e with acute"
   accent, then it will return `false`:
 
-      iex> String.contains?(:unicode.characters_to_nfc_binary("é"), "e")
+      iex> String.contains?(String.normalize("é", :nfc), "e")
       false
 
   """

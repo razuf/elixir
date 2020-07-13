@@ -27,16 +27,12 @@ defmodule Module.Checker do
   end
 
   defp prepare_module({module, binary}) when is_binary(binary) do
-    with {:ok, debug_info} <- debug_info(module, binary),
-         {:ok, checker_info} <- checker_chunk(binary) do
-      {:ok,
-       %{
-         module: module,
-         file: debug_info.file,
-         definitions: debug_info.definitions,
-         deprecated: checker_info.deprecated,
-         no_warn_undefined: checker_info.no_warn_undefined
-       }}
+    with {:ok, {_, [debug_info: chunk]}} <- :beam_lib.chunks(binary, [:debug_info]),
+         {:debug_info_v1, backend, data} <- chunk,
+         {:ok, module_map} <- backend.debug_info(:elixir_v1, module, data, []) do
+      prepare_module({module, module_map})
+    else
+      _ -> :error
     end
   end
 
@@ -46,26 +42,6 @@ defmodule Module.Checker do
       value <- List.wrap(values),
       do: value
     )
-  end
-
-  defp debug_info(module, binary) do
-    with {:ok, {_, [debug_info: chunk]}} <- :beam_lib.chunks(binary, [:debug_info]),
-         {:debug_info_v1, backend, data} <- chunk,
-         {:ok, info} <- backend.debug_info(:elixir_v1, module, data, []) do
-      {:ok, %{definitions: info.definitions, file: info.relative_file}}
-    else
-      _ -> :error
-    end
-  end
-
-  defp checker_chunk(binary) do
-    with {:ok, {_, [{'ExCk', chunk}]}} <- :beam_lib.chunks(binary, ['ExCk']),
-         {:elixir_checker_v1, contents} <- :erlang.binary_to_term(chunk) do
-      deprecated = Enum.map(contents.exports, fn {fun, map} -> {fun, map.deprecated_reason} end)
-      {:ok, %{deprecated: deprecated, no_warn_undefined: contents.no_warn_undefined}}
-    else
-      _ -> :error
-    end
   end
 
   defp undefined_and_deprecation_warnings(map, cache) do
@@ -221,7 +197,7 @@ defmodule Module.Checker do
 
   defp warn(meta, state, warning) do
     {fun, arity} = state.function
-    location = {state.file, meta[:line], {state.module, fun, arity}}
+    location = {state.file, meta[:line] || 0, {state.module, fun, arity}}
     %{state | warnings: [{__MODULE__, warning, location} | state.warnings]}
   end
 
@@ -308,7 +284,7 @@ defmodule Module.Checker do
 
   defp format_file_line(file, line) do
     file = Path.relative_to_cwd(file)
-    line = if line, do: [?: | Integer.to_string(line)], else: []
+    line = if line > 0, do: [?: | Integer.to_string(line)], else: []
     ["  ", file, line]
   end
 

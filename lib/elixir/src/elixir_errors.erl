@@ -16,8 +16,8 @@ erl_warn(Line, File, Warning) when is_integer(Line), is_binary(File) ->
   io_warn(Line, File, Warning, [Warning, "\n  ", file_format(Line, File), $\n]).
 
 %% Low-level warning, all other warnings are built on top of it.
--spec io_warn(non_neg_integer() | nil, unicode:chardata() | nil, unicode:chardata(), unicode:chardata()) -> ok.
-io_warn(Line, File, LogMessage, PrintMessage) when is_integer(Line) or (Line == nil), is_binary(File) or (File == nil) ->
+-spec io_warn(non_neg_integer(), unicode:chardata() | nil, unicode:chardata(), unicode:chardata()) -> ok.
+io_warn(Line, File, LogMessage, PrintMessage) when is_integer(Line), is_binary(File) or (File == nil) ->
   send_warning(Line, File, LogMessage),
   print_warning(PrintMessage).
 
@@ -30,13 +30,13 @@ warning_prefix() ->
 
 %% General forms handling.
 
--spec form_error(list(), binary() | #{file := binary()}, module(), any()) -> no_return().
+-spec form_error(list(), binary() | #{file := binary(), _ => _}, module(), any()) -> no_return().
 form_error(Meta, #{file := File}, Module, Desc) ->
   compile_error(Meta, File, Module:format_error(Desc));
 form_error(Meta, File, Module, Desc) ->
   compile_error(Meta, File, Module:format_error(Desc)).
 
--spec form_warn(list(), binary() | #{file := binary()}, module(), any()) -> ok.
+-spec form_warn(list(), binary() | #{file := binary(), _ => _}, module(), any()) -> ok.
 form_warn(Meta, File, Module, Desc) when is_list(Meta), is_binary(File) ->
   do_form_warn(Meta, File, #{}, Module:format_error(Desc));
 form_warn(Meta, #{file := File} = E, Module, Desc) when is_list(Meta) ->
@@ -98,7 +98,7 @@ parse_error(Line, File, <<"syntax error before: ">>, Keyword)
          Keyword == <<"'after'">>;
          Keyword == <<"'catch'">>;
          Keyword == <<"'end'">> ->
-  raise_keyword(Line, File, binary_part(Keyword, 1, byte_size(Keyword) - 2));
+  raise_reserved(Line, File, binary_part(Keyword, 1, byte_size(Keyword) - 2));
 
 %% Show a nicer message for keywords pt2 (Elixir keywords show up as is)
 parse_error(Line, File, <<"syntax error before: ">>, Keyword)
@@ -109,7 +109,7 @@ parse_error(Line, File, <<"syntax error before: ">>, Keyword)
          Keyword == <<"false">>;
          Keyword == <<"nil">>;
          Keyword == <<"in">> ->
-  raise_keyword(Line, File, Keyword);
+  raise_reserved(Line, File, Keyword);
 
 %% Produce a human-readable message for errors before a sigil
 parse_error(Line, File, <<"syntax error before: ">>, <<"{sigil,", _Rest/binary>> = Full) ->
@@ -153,11 +153,11 @@ parse_erl_term(Term) ->
   {ok, Parsed} = erl_parse:parse_term(Tokens ++ [{dot, 1}]),
   Parsed.
 
-raise_keyword(Line, File, Keyword) ->
+raise_reserved(Line, File, Keyword) ->
   raise(Line, File, 'Elixir.SyntaxError',
         <<"syntax error before: ", Keyword/binary, ". \"", Keyword/binary, "\" is a "
-          "keyword in Elixir and therefore its usage is limited. For instance, it can't "
-          "be used as a variable or be defined nor invoked as a regular function">>).
+          "reserved word in Elixir and therefore its usage is limited. For instance, "
+          "it can't be used as a variable or be defined nor invoked as a regular function">>).
 
 %% Helpers
 
